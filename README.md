@@ -7,8 +7,9 @@ documented HTTP API.
 
 ## Stack
 
-- Go 1.26, [Fiber v3](https://docs.gofiber.io)
+- Go 1.27, [Fiber v3](https://docs.gofiber.io)
 - SQLite (WAL) via [Bun](https://bun.uptrace.dev) + pure-Go `modernc.org/sqlite`
+- Storage backends: local filesystem (atomic staged writes) or S3/MinIO
 - Structured JSON logging (`slog`), optional Better Stack remote sink
 - OpenTelemetry tracing, Prometheus metrics, OpenAPI 3 contract (oapi-codegen)
 
@@ -31,7 +32,15 @@ Health: `GET /healthz`
 | `LOGTAIL_TOKEN`    | –                    | Better Stack source token (secret)       |
 | `LOGTAIL_LEVEL`    | `info`               | Minimum level shipped to Better Stack    |
 | `STORAGE_DIR`      | `./data/storage`     | Attachment storage directory             |
+| `STAGING_DIR`      | `./data/staging`     | Upload staging directory                 |
 | `DB_PATH`          | `./data/attachments.db` | SQLite database path                 |
+| `STORAGE_BACKEND`  | `local`              | `local` or `s3`                          |
+| `S3_BUCKET`        | –                    | Bucket (required when backend is s3)     |
+| `S3_REGION`        | `us-east-1`          | AWS region                               |
+| `S3_ENDPOINT`      | –                    | Custom endpoint (e.g. MinIO)             |
+| `S3_PATH_STYLE`    | `false`              | Path-style addressing (true for MinIO)   |
+| `S3_ACCESS_KEY_ID` | –                    | Static key; omit to use AWS default chain |
+| `S3_SECRET_ACCESS_KEY` | –                | Static secret (secret)                   |
 | `API_KEYS`         | –                    | Comma-separated API keys (secret)        |
 | `MAX_UPLOAD_MB`    | `50`                 | Max upload size in megabytes             |
 | `SHUTDOWN_TIMEOUT` | `15s`                | Graceful shutdown deadline               |

@@ -25,7 +25,16 @@ type Config struct {
 	LogtailLevel string `env:"LOGTAIL_LEVEL" env-default:"info"`
 
 	StorageDir string `env:"STORAGE_DIR" env-default:"./data/storage"`
+	StagingDir string `env:"STAGING_DIR" env-default:"./data/staging"`
 	DBPath     string `env:"DB_PATH" env-default:"./data/attachments.db"`
+
+	StorageBackend string `env:"STORAGE_BACKEND" env-default:"local"` // local | s3
+	S3Endpoint     string `env:"S3_ENDPOINT"`                         // custom endpoint (e.g. MinIO); empty = AWS
+	S3Region       string `env:"S3_REGION" env-default:"us-east-1"`
+	S3Bucket       string `env:"S3_BUCKET"`
+	S3PathStyle    bool   `env:"S3_PATH_STYLE" env-default:"false"` // true for MinIO & S3-compatible stores
+	S3AccessKey    string `env:"S3_ACCESS_KEY_ID"`
+	S3SecretKey    string `env:"S3_SECRET_ACCESS_KEY"` // secret; empty = AWS default credential chain (IAM role)
 
 	APIKeys     []string `env:"API_KEYS" env-separator:","`
 	MaxUploadMB int      `env:"MAX_UPLOAD_MB" env-default:"50"`
@@ -59,8 +68,23 @@ func (c Config) Validate() error {
 	if _, err := parseLevel(c.LogtailLevel); err != nil {
 		return fmt.Errorf("LOGTAIL_LEVEL: %w", err)
 	}
-	if c.StorageDir == "" || c.DBPath == "" {
-		return errors.New("STORAGE_DIR and DB_PATH must not be empty")
+	if c.StorageDir == "" || c.DBPath == "" || c.StagingDir == "" {
+		return errors.New("STORAGE_DIR, STAGING_DIR and DB_PATH must not be empty")
+	}
+	switch c.StorageBackend {
+	case "local":
+	case "s3":
+		if c.S3Bucket == "" {
+			return errors.New("S3_BUCKET is required when STORAGE_BACKEND=s3")
+		}
+		if (c.S3AccessKey == "") != (c.S3SecretKey == "") {
+			return errors.New("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together (or both omitted to use the AWS default credential chain)")
+		}
+		if c.S3Region == "" {
+			return errors.New("S3_REGION must not be empty")
+		}
+	default:
+		return fmt.Errorf("STORAGE_BACKEND must be local or s3, got %q", c.StorageBackend)
 	}
 	if c.Env == "prod" && len(c.APIKeys) == 0 {
 		return errors.New("API_KEYS is required when APP_ENV=prod")

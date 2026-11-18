@@ -14,7 +14,9 @@ func validConfig() Config {
 		LogLevel:        "info",
 		LogtailLevel:    "info",
 		StorageDir:      "./data/storage",
+		StagingDir:      "./data/staging",
 		DBPath:          "./data/attachments.db",
+		StorageBackend:  "local",
 		MaxUploadMB:     50,
 		ShutdownTimeout: 15 * time.Second,
 	}
@@ -56,6 +58,36 @@ func TestValidateRejectsBadValues(t *testing.T) {
 				t.Fatalf("%s: expected error", name)
 			}
 		})
+	}
+}
+
+func TestValidateBackendRules(t *testing.T) {
+	c := validConfig()
+	c.StorageBackend = "minio"
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for unknown backend")
+	}
+
+	c = validConfig()
+	c.StorageBackend = "s3"
+	c.S3Region = "us-east-1"
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for s3 without bucket")
+	}
+
+	c.S3Bucket = "attachments"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("s3 with default chain should pass: %v", err)
+	}
+
+	c.S3AccessKey = "AKIA..."
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for access key without secret")
+	}
+
+	c.S3SecretKey = "secret"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("s3 with static creds should pass: %v", err)
 	}
 }
 

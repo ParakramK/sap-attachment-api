@@ -3,14 +3,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/parakram/sap-attachment-api/internal/config"
+	"github.com/parakram/sap-attachment-api/internal/db"
 	"github.com/parakram/sap-attachment-api/internal/logging"
 	"github.com/parakram/sap-attachment-api/internal/server"
+	"github.com/parakram/sap-attachment-api/internal/service"
+	"github.com/parakram/sap-attachment-api/internal/storage"
 )
 
 func main() {
@@ -32,7 +37,46 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	app := server.New(cfg, log)
+	database, err := db.Open(cfg)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	repo := db.NewRepo(database)
+
+	backend, err := storage.New(cfg)
+	if err != nil {
+		return fmt.Errorf("init storage backend: %w", err)
+	}
+
+	// Staging dir is created up front: uploads and /readyz depend on it.
+	if err := os.MkdirAll(cfg.StagingDir, 0o750); err != nil {
+		return fmt.Errorf("create staging dir: %w", err)
+	}
+
+	// Startup reconciliation: clean orphan staging files, resolve rows stuck
+	// in staged. Failures are logged but not fatal — the service still runs.
+	sweeper := service.NewSweeper(repo, backend, cfg.StagingDir, time.Hour)
+	swept, err := sweeper.Run(ctx)
+	if err != nil {
+		log.Error("storage reconciliation failed", "err", err)
+	} else {
+		log.Info("storage reconciled",
+			"removed_temp_files", swept.RemovedTempFiles, "resolved_rows", swept.ResolvedRows)
+	}
+
+	ready := func(ctx context.Context) error {
+		if err := database.PingContext(ctx); err != nil {
+			return fmt.Errorf("database: %w", err)
+		}
+		if st, err := os.Stat(cfg.StagingDir); err != nil || !st.IsDir() {
+			return errors.New("staging directory missing")
+		}
+		return nil
+	}
+
+	app := server.New(cfg, log, ready)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- app.Listen(cfg.Addr) }()

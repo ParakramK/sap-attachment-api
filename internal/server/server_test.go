@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -23,6 +24,7 @@ func testConfig() *config.Config {
 		Addr:            ":0",
 		LogLevel:        "info",
 		StorageDir:      "./data/storage",
+		StagingDir:      "./data/staging",
 		DBPath:          "./data/test.db",
 		MaxUploadMB:     10,
 		ShutdownTimeout: time.Second,
@@ -45,7 +47,7 @@ func do(t *testing.T, app *fiber.App, method, path string) *http.Response {
 }
 
 func TestHealthz(t *testing.T) {
-	app := server.New(testConfig(), testLogger())
+	app := server.New(testConfig(), testLogger(), func(context.Context) error { return nil })
 	resp := do(t, app, http.MethodGet, "/healthz")
 
 	if resp.StatusCode != http.StatusOK {
@@ -64,7 +66,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestNotFoundUsesErrorEnvelope(t *testing.T) {
-	app := server.New(testConfig(), testLogger())
+	app := server.New(testConfig(), testLogger(), func(context.Context) error { return nil })
 	resp := do(t, app, http.MethodGet, "/definitely-not-a-route")
 
 	if resp.StatusCode != http.StatusNotFound {
@@ -92,7 +94,7 @@ func TestNotFoundUsesErrorEnvelope(t *testing.T) {
 func TestAccessLogReflectsErrorStatus(t *testing.T) {
 	var buf syncBuffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
-	app := server.New(testConfig(), log)
+	app := server.New(testConfig(), log, func(context.Context) error { return nil })
 
 	do(t, app, http.MethodGet, "/definitely-not-a-route")
 

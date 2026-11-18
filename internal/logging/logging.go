@@ -37,7 +37,7 @@ func New(cfg *config.Config) (*slog.Logger, func(context.Context)) {
 			Level:   cfg.RemoteLevel(),
 			Token:   cfg.LogtailToken,
 			Timeout: 10 * time.Second,
-		}.NewBetterstackHandler())
+		}.NewBetterstackHandler(), asyncQueueSize)
 		remote = a
 		flush = a.Close
 	}
@@ -67,8 +67,8 @@ type asyncHandler struct {
 	next slog.Handler
 }
 
-func newAsyncHandler(next slog.Handler) *asyncHandler {
-	core := &asyncCore{ch: make(chan slog.Record, asyncQueueSize), done: make(chan struct{})}
+func newAsyncHandler(next slog.Handler, queue int) *asyncHandler {
+	core := &asyncCore{ch: make(chan slog.Record, queue), done: make(chan struct{})}
 	go core.run(next)
 	return &asyncHandler{core: core, next: next}
 }

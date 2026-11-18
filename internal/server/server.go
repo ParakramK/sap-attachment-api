@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -17,8 +18,9 @@ import (
 	"github.com/parakram/sap-attachment-api/internal/config"
 )
 
-// New builds the Fiber app. Callers own the instance and its lifecycle.
-func New(cfg *config.Config, log *slog.Logger) *fiber.App {
+// New builds the Fiber app. ready is checked by /readyz; callers own the
+// instance and its lifecycle.
+func New(cfg *config.Config, log *slog.Logger, ready func(context.Context) error) *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName:      "sap-attachment-api",
 		ErrorHandler: errorHandler(log),
@@ -30,6 +32,14 @@ func New(cfg *config.Config, log *slog.Logger) *fiber.App {
 	app.Use(requestLogger(log))
 
 	app.Get("/healthz", func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
+	app.Get("/readyz", func(c fiber.Ctx) error {
+		if err := ready(c.Context()); err != nil {
+			return c.Status(http.StatusServiceUnavailable).
+				JSON(fiber.Map{"status": "unavailable", "detail": err.Error()})
+		}
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
