@@ -16,7 +16,7 @@ func validConfig() Config {
 		StorageDir:      "./data/storage",
 		StagingDir:      "./data/staging",
 		DBPath:          "./data/attachments.db",
-		StorageBackend:  "local",
+		S3Region:        "us-east-1",
 		MaxUploadMB:     50,
 		ShutdownTimeout: 15 * time.Second,
 	}
@@ -61,23 +61,10 @@ func TestValidateRejectsBadValues(t *testing.T) {
 	}
 }
 
-func TestValidateBackendRules(t *testing.T) {
+func TestValidateS3CredentialsRules(t *testing.T) {
 	c := validConfig()
-	c.StorageBackend = "minio"
-	if err := c.Validate(); err == nil {
-		t.Fatal("expected error for unknown backend")
-	}
-
-	c = validConfig()
-	c.StorageBackend = "s3"
-	c.S3Region = "us-east-1"
-	if err := c.Validate(); err == nil {
-		t.Fatal("expected error for s3 without bucket")
-	}
-
-	c.S3Bucket = "attachments"
 	if err := c.Validate(); err != nil {
-		t.Fatalf("s3 with default chain should pass: %v", err)
+		t.Fatalf("s3 fetch config optional: %v", err)
 	}
 
 	c.S3AccessKey = "AKIA..."

@@ -22,12 +22,12 @@ import (
 // Run at startup and on demand (admin endpoint) after crashes or upgrades.
 type Sweeper struct {
 	repo         *db.Repo
-	backend      storage.Storage
+	backend      *storage.Local
 	stagingDir   string
 	maxStagedAge time.Duration
 }
 
-func NewSweeper(repo *db.Repo, backend storage.Storage, stagingDir string, maxStagedAge time.Duration) *Sweeper {
+func NewSweeper(repo *db.Repo, backend *storage.Local, stagingDir string, maxStagedAge time.Duration) *Sweeper {
 	return &Sweeper{repo: repo, backend: backend, stagingDir: stagingDir, maxStagedAge: maxStagedAge}
 }
 

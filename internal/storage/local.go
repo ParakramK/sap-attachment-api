@@ -10,6 +10,9 @@ import (
 
 // Local stores objects on the local filesystem under a single root, using
 // atomic renames from the staging directory (same filesystem requirement).
+//
+// Objects are always atomic: Save moves a synced staging file into place, so
+// readers see either nothing or the complete object.
 type Local struct {
 	root string
 }

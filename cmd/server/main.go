@@ -45,7 +45,7 @@ func run() error {
 
 	repo := db.NewRepo(database)
 
-	backend, err := storage.New(cfg)
+	backend, err := storage.NewLocal(cfg.StorageDir)
 	if err != nil {
 		return fmt.Errorf("init storage backend: %w", err)
 	}
