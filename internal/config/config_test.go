@@ -18,6 +18,7 @@ func validConfig() Config {
 		DBPath:          "./data/attachments.db",
 		S3Region:        "us-east-1",
 		MaxUploadMB:     50,
+		FetchTimeout:    60 * time.Second,
 		ShutdownTimeout: 15 * time.Second,
 	}
 }

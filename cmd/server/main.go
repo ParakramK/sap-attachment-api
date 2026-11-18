@@ -12,6 +12,7 @@ import (
 
 	"github.com/parakram/sap-attachment-api/internal/config"
 	"github.com/parakram/sap-attachment-api/internal/db"
+	"github.com/parakram/sap-attachment-api/internal/fetch"
 	"github.com/parakram/sap-attachment-api/internal/logging"
 	"github.com/parakram/sap-attachment-api/internal/server"
 	"github.com/parakram/sap-attachment-api/internal/service"
@@ -43,16 +44,21 @@ func run() error {
 	}
 	defer func() { _ = database.Close() }()
 
-	repo := db.NewRepo(database)
-
 	backend, err := storage.NewLocal(cfg.StorageDir)
 	if err != nil {
 		return fmt.Errorf("init storage backend: %w", err)
 	}
 
-	// Staging dir is created up front: uploads and /readyz depend on it.
-	if err := os.MkdirAll(cfg.StagingDir, 0o750); err != nil {
-		return fmt.Errorf("create staging dir: %w", err)
+	repo := db.NewRepo(database)
+
+	uploader, err := service.NewUploader(repo, backend, cfg.StagingDir, cfg.MaxUploadBytes())
+	if err != nil {
+		return fmt.Errorf("init uploader: %w", err)
+	}
+
+	fetcher, err := fetch.New(cfg)
+	if err != nil {
+		return fmt.Errorf("init remote fetcher: %w", err)
 	}
 
 	// Startup reconciliation: clean orphan staging files, resolve rows stuck
@@ -76,7 +82,15 @@ func run() error {
 		return nil
 	}
 
-	app := server.New(cfg, log, ready)
+	app := server.New(server.Deps{
+		Cfg:      cfg,
+		Log:      log,
+		Ready:    ready,
+		Repo:     repo,
+		Store:    backend,
+		Uploader: uploader,
+		Fetcher:  fetcher,
+	})
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- app.Listen(cfg.Addr) }()

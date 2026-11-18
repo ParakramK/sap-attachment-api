@@ -1,6 +1,5 @@
 // Package server wires the Fiber application: middleware chain, JSON error
-// envelope, and health endpoints. Feature routes are added by later
-// milestones.
+// envelope, health endpoints, and the attachment API.
 package server
 
 import (
@@ -12,36 +11,86 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/helmet"
+	"github.com/gofiber/fiber/v3/middleware/idempotency"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 
 	"github.com/parakram/sap-attachment-api/internal/config"
+	"github.com/parakram/sap-attachment-api/internal/db"
+	"github.com/parakram/sap-attachment-api/internal/fetch"
+	"github.com/parakram/sap-attachment-api/internal/service"
+	"github.com/parakram/sap-attachment-api/internal/storage"
 )
 
-// New builds the Fiber app. ready is checked by /readyz; callers own the
-// instance and its lifecycle.
-func New(cfg *config.Config, log *slog.Logger, ready func(context.Context) error) *fiber.App {
+// Deps carries everything the server needs; constructed in main.
+type Deps struct {
+	Cfg      *config.Config
+	Log      *slog.Logger
+	Ready    func(context.Context) error
+	Repo     *db.Repo
+	Store    *storage.Local
+	Uploader *service.Uploader
+	Fetcher  *fetch.Fetcher
+}
+
+// Connection timeouts: uploads stream slowly on constrained links, so reads
+// get a generous budget.
+const (
+	readTimeout     = 2 * time.Minute
+	writeTimeout    = 2 * time.Minute
+	idleTimeout     = 1 * time.Minute
+	rateLimitPerMin = 120 // per-IP requests per minute, uploads included
+)
+
+// New builds the Fiber app. Callers own the instance and its lifecycle.
+func New(d Deps) *fiber.App {
+	cfg := d.Cfg
 	app := fiber.New(fiber.Config{
-		AppName:      "sap-attachment-api",
-		ErrorHandler: errorHandler(log),
+		AppName:           "sap-attachment-api",
+		ErrorHandler:      errorHandler(d.Log),
+		StreamRequestBody: true, // upload bodies stream instead of buffering
+		BodyLimit:         int(cfg.MaxUploadBytes() + 1<<20),
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	})
 
 	app.Use(recover.New())
 	app.Use(requestid.New())
 	app.Use(helmet.New())
-	app.Use(requestLogger(log))
+	app.Use(limiter.New(limiter.Config{Max: rateLimitPerMin, Expiration: time.Minute}))
+	app.Use(requestLogger(d.Log))
 
 	app.Get("/healthz", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
 	app.Get("/readyz", func(c fiber.Ctx) error {
-		if err := ready(c.Context()); err != nil {
+		if err := d.Ready(c.Context()); err != nil {
 			return c.Status(http.StatusServiceUnavailable).
 				JSON(fiber.Map{"status": "unavailable", "detail": err.Error()})
 		}
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
+
+	v1 := app.Group("/v1")
+	v1.Use(apiKeyAuth(cfg.APIKeys))
+
+	// Retries with the same X-Idempotency-Key replay the original response
+	// instead of re-uploading; keys are scoped per authenticated caller.
+	v1.Post("/attachments",
+		idempotency.New(idempotency.Config{
+			KeyScope: func(c fiber.Ctx) string {
+				if caller, ok := c.Locals("caller").(string); ok {
+					return caller
+				}
+				return ""
+			},
+		}),
+		createAttachment(d))
+	v1.Get("/attachments/:id", getAttachment(d))
+	v1.Delete("/attachments/:id", deleteAttachment(d))
 
 	return app
 }

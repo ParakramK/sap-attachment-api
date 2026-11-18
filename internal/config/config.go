@@ -45,7 +45,7 @@ type Config struct {
 	FetchAllowPrivateNet bool `env:"FETCH_ALLOW_PRIVATE_NET" env-default:"false"`
 	// Optional allowlist for s3:// sources; empty = any bucket the
 	// credentials can read.
-	S3AllowedBuckets []string `env:"S3_ALLOWED_BUCKETS" env-separator:","`
+	S3AllowedBuckets []string      `env:"S3_ALLOWED_BUCKETS" env-separator:","`
 	FetchTimeout     time.Duration `env:"FETCH_TIMEOUT" env-default:"60s"`
 
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-default:"15s"`
