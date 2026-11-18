@@ -1,17 +1,18 @@
 # sap-attachment-api
 
 Production-grade file ingestion service for internal SAP Business One
-integration: receives attachment uploads (multipart or URL fetch), stores them
-on the local filesystem with content checksums, and exposes metadata over a
-documented HTTP API.
+integration: receives attachments as direct uploads or by downloading a
+remote source (HTTP URL or S3 object), stores them on the local filesystem
+with content checksums, and exposes metadata over a documented HTTP API.
+SAP reads the stored files directly from the `storage_path` in the response.
 
 ## Stack
 
 - Go 1.27, [Fiber v3](https://docs.gofiber.io)
 - SQLite (WAL) via [Bun](https://bun.uptrace.dev) + pure-Go `modernc.org/sqlite`
-- Storage backends: local filesystem (atomic staged writes) or S3/MinIO
+- Local filesystem storage (atomic staged writes)
 - Structured JSON logging (`slog`), optional Better Stack remote sink
-- OpenTelemetry tracing, Prometheus metrics, OpenAPI 3 contract (oapi-codegen)
+- OpenAPI 3 contract served at `/openapi.yaml`, interactive docs at `/docs`
 
 ## Running
 
@@ -20,30 +21,71 @@ cp .env.example .env   # optional: tune via environment variables
 make run               # dev mode on :8080
 ```
 
-Health: `GET /healthz`
+Health: `GET /healthz` · Readiness: `GET /readyz` · Docs: `GET /docs`
+
+## API
+
+All `/v1` endpoints require `X-API-Key` (set `API_KEYS`; unset keys disable
+auth in dev). Errors use one envelope: `{"code", "message", "request_id"}`.
+
+### Upload a file directly
+
+```sh
+curl -X POST http://localhost:8080/v1/attachments \
+  -H "X-API-Key: local-dev-key" \
+  -F "file=@invoice.pdf"
+```
+
+### Ingest from a remote source
+
+```sh
+curl -X POST http://localhost:8080/v1/attachments \
+  -H "X-API-Key: local-dev-key" -H "Content-Type: application/json" \
+  -d '{"source_url": "https://example.com/report.pdf"}'
+
+curl -X POST http://localhost:8080/v1/attachments \
+  -H "X-API-Key: local-dev-key" -H "Content-Type: application/json" \
+  -d '{"source_uri": "s3://my-bucket/invoices/2026-01.pdf"}'
+```
+
+Remote fetches are SSRF-hardened: private/reserved network targets are
+denied unless `FETCH_ALLOW_PRIVATE_NET=true`, redirects are bounded and
+re-validated, and only http(s)/s3 schemes are accepted.
+
+### Metadata, dedupe, idempotency
+
+`GET /v1/attachments/{id}` returns the metadata record; `DELETE /v1/
+attachments/{id}` removes the stored file and its record (the only
+retention mechanism — no automatic expiry).
+
+- Identical content is stored once: re-uploads return the original record
+  with `200` instead of `201` (dedupe key: SHA-256).
+- Retries should carry `X-Idempotency-Key` (UUID): the original response is
+  replayed instead of re-uploading. Keys are scoped per API key.
 
 ## Configuration (environment)
 
-| Variable           | Default              | Description                              |
-| ------------------ | -------------------- | ---------------------------------------- |
-| `APP_ENV`          | `dev`                | `dev` or `prod` (prod requires API_KEYS) |
-| `ADDR`             | `:8080`              | Listen address                           |
-| `LOG_LEVEL`        | `info`               | slog level for stdout                    |
-| `LOGTAIL_TOKEN`    | –                    | Better Stack source token (secret)       |
-| `LOGTAIL_LEVEL`    | `info`               | Minimum level shipped to Better Stack    |
-| `STORAGE_DIR`      | `./data/storage`     | Attachment storage directory             |
-| `STAGING_DIR`      | `./data/staging`     | Upload staging directory                 |
-| `DB_PATH`          | `./data/attachments.db` | SQLite database path                 |
-| `STORAGE_BACKEND`  | `local`              | `local` or `s3`                          |
-| `S3_BUCKET`        | –                    | Bucket (required when backend is s3)     |
-| `S3_REGION`        | `us-east-1`          | AWS region                               |
-| `S3_ENDPOINT`      | –                    | Custom endpoint (e.g. MinIO)             |
-| `S3_PATH_STYLE`    | `false`              | Path-style addressing (true for MinIO)   |
-| `S3_ACCESS_KEY_ID` | –                    | Static key; omit to use AWS default chain |
-| `S3_SECRET_ACCESS_KEY` | –                | Static secret (secret)                   |
-| `API_KEYS`         | –                    | Comma-separated API keys (secret)        |
-| `MAX_UPLOAD_MB`    | `50`                 | Max upload size in megabytes             |
-| `SHUTDOWN_TIMEOUT` | `15s`                | Graceful shutdown deadline               |
+| Variable               | Default                  | Description                                    |
+| ---------------------- | ------------------------ | ---------------------------------------------- |
+| `APP_ENV`              | `dev`                    | `dev` or `prod` (prod requires API_KEYS)       |
+| `ADDR`                 | `:8080`                  | Listen address                                 |
+| `LOG_LEVEL`            | `info`                   | slog level for stdout                          |
+| `LOGTAIL_TOKEN`        | –                        | Better Stack source token (secret)             |
+| `LOGTAIL_LEVEL`        | `info`                   | Minimum level shipped to Better Stack          |
+| `STORAGE_DIR`          | `./data/storage`         | Attachment storage directory                   |
+| `STAGING_DIR`          | `./data/staging`         | Upload staging directory                       |
+| `DB_PATH`              | `./data/attachments.db`  | SQLite database path                           |
+| `API_KEYS`             | –                        | Comma-separated API keys (secret)              |
+| `MAX_UPLOAD_MB`        | `50`                     | Max upload size in megabytes                   |
+| `FETCH_ALLOW_PRIVATE_NET` | `false`               | Allow fetching private/reserved network hosts  |
+| `FETCH_TIMEOUT`        | `60s`                    | Budget for one remote fetch (incl. redirects)  |
+| `S3_REGION`            | `us-east-1`              | AWS region for s3:// source fetches            |
+| `S3_ENDPOINT`          | –                        | Custom endpoint (e.g. MinIO)                   |
+| `S3_PATH_STYLE`        | `false`                  | Path-style addressing (true for MinIO)         |
+| `S3_ACCESS_KEY_ID`     | –                        | Static key; omit to use AWS default chain      |
+| `S3_SECRET_ACCESS_KEY` | –                        | Static secret (secret)                         |
+| `S3_ALLOWED_BUCKETS`   | –                        | Comma-separated s3:// bucket allowlist; empty = any readable bucket |
+| `SHUTDOWN_TIMEOUT`     | `15s`                    | Graceful shutdown deadline                     |
 
 Secrets are read from the environment only.
 

@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -43,6 +44,27 @@ const (
 	rateLimitPerMin = 120 // per-IP requests per minute, uploads included
 )
 
+//go:embed openapi.yaml
+var openapiSpec []byte
+
+// swaggerDocs is served at /docs; the UI assets come from a CDN, so this is
+// a developer tool, not an offline one.
+const swaggerDocs = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>sap-attachment-api docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    SwaggerUIBundle({ url: "/openapi.yaml", dom_id: "#swagger" });
+  </script>
+</body>
+</html>`
+
 // New builds the Fiber app. Callers own the instance and its lifecycle.
 func New(d Deps) *fiber.App {
 	cfg := d.Cfg
@@ -72,6 +94,14 @@ func New(d Deps) *fiber.App {
 				JSON(fiber.Map{"status": "unavailable", "detail": err.Error()})
 		}
 		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
+	// API contract + interactive docs (unauthenticated; no secrets here).
+	app.Get("/openapi.yaml", func(c fiber.Ctx) error {
+		return c.Type("yaml").Send(openapiSpec)
+	})
+	app.Get("/docs", func(c fiber.Ctx) error {
+		return c.Type("html").SendString(swaggerDocs)
 	})
 
 	v1 := app.Group("/v1")

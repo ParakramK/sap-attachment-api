@@ -1,0 +1,220 @@
+openapi: 3.0.3
+info:
+  title: sap-attachment-api
+  description: |
+    File ingestion service for SAP Business One integration. Receives
+    attachments as a direct multipart upload or by downloading a remote
+    source (http(s) URL or s3://bucket/key URI), stores the file on the
+    local filesystem, and returns metadata — including the absolute
+    `storage_path` that the SAP integration reads the file from.
+
+    All `/v1` endpoints require the `X-API-Key` header. Retries should
+    carry an `X-Idempotency-Key` (UUID): the original response is replayed
+    instead of storing the content twice.
+  version: 1.0.0
+servers:
+  - url: /
+tags:
+  - name: attachments
+  - name: ops
+paths:
+  /healthz:
+    get:
+      tags: [ops]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+  /readyz:
+    get:
+      tags: [ops]
+      summary: Readiness probe (database and staging directory reachable)
+      security: []
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/attachments:
+    post:
+      tags: [attachments]
+      summary: Ingest an attachment
+      description: |
+        Two mutually exclusive modes, selected by Content-Type:
+
+        - `multipart/form-data` — upload the file directly; the first file
+          part is used.
+        - `application/json` — name a remote source the service downloads:
+          `{"source_url": "https://..."}` or
+          `{"source_uri": "s3://bucket/key"}` (exactly one).
+
+        The stored content type is always sniffed server-side. Duplicate
+        content is deduplicated by SHA-256: the first stored record is
+        returned with `200` instead of `201`.
+      security: [{ ApiKeyAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The attachment content.
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_url:
+                  type: string
+                  format: uri
+                  description: http(s) URL to download. Private/reserved network targets are denied unless FETCH_ALLOW_PRIVATE_NET is set.
+                source_uri:
+                  type: string
+                  description: S3 object URI (s3://bucket/key). Bucket must pass the optional S3_ALLOWED_BUCKETS allowlist.
+                filename:
+                  type: string
+                  description: Optional file name override; otherwise derived from the source.
+      responses:
+        "201":
+          description: Attachment stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+        "200":
+          description: Content already stored — the existing attachment is returned (deduplicated)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "502": { $ref: "#/components/responses/BadGateway" }
+  /v1/attachments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AttachmentID"
+    get:
+      tags: [attachments]
+      summary: Fetch attachment metadata
+      security: [{ ApiKeyAuth: [] }]
+      responses:
+        "200":
+          description: The attachment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [attachments]
+      summary: Delete an attachment (removes the stored file and its record)
+      security: [{ ApiKeyAuth: [] }]
+      responses:
+        "204":
+          description: Deleted
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    AttachmentID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: false
+      description: UUID. Repeated requests with the same key replay the original response instead of re-uploading.
+      schema: { type: string, format: uuid }
+  responses:
+    BadRequest:
+      description: Invalid request (bad JSON, invalid source URI, missing file part)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Remote source resolves to a denied network or a bucket outside the allowlist
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Attachment or remote source not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooLarge:
+      description: Upload exceeds MAX_UPLOAD_MB
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UnsupportedMediaType:
+      description: Expected multipart/form-data or application/json
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadGateway:
+      description: Remote source could not be downloaded
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          description: Sanitized display name; path separators removed.
+        content_type:
+          type: string
+          description: Server-sniffed MIME type (client-supplied types are not trusted).
+        size_bytes: { type: integer, format: int64 }
+        sha256:
+          type: string
+          description: Hex digest of the stored content.
+        status:
+          type: string
+          enum: [available]
+        storage_path:
+          type: string
+          description: Absolute local disk path where the stored file lives; the SAP integration reads from here.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Error:
+      type: object
+      properties:
+        code: { type: integer }
+        message: { type: string }
+        request_id:
+          type: string
+          description: Correlates with the request_id field of server logs.

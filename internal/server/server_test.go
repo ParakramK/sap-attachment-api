@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,28 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
+func TestOpenAPIAndDocsServed(t *testing.T) {
+	app := server.New(server.Deps{
+		Cfg:   testConfig(),
+		Log:   testLogger(),
+		Ready: func(context.Context) error { return nil },
+	})
+
+	resp := do(t, app, http.MethodGet, "/openapi.yaml")
+	body := readAll(t, resp)
+	if resp.StatusCode != http.StatusOK ||
+		!strings.Contains(body, "/v1/attachments") ||
+		!strings.Contains(body, "X-API-Key") {
+		t.Fatalf("openapi.yaml incomplete: status=%d len=%d", resp.StatusCode, len(body))
+	}
+
+	resp = do(t, app, http.MethodGet, "/docs")
+	body = readAll(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "SwaggerUIBundle") {
+		t.Fatalf("docs page broken: status=%d", resp.StatusCode)
+	}
+}
+
 func do(t *testing.T, app *fiber.App, method, path string) *http.Response {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
@@ -47,6 +70,15 @@ func do(t *testing.T, app *fiber.App, method, path string) *http.Response {
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
+}
+
+func readAll(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return string(data)
 }
 
 func TestHealthz(t *testing.T) {

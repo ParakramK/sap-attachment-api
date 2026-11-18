@@ -18,10 +18,16 @@ type Local struct {
 }
 
 func NewLocal(root string) (*Local, error) {
-	if err := os.MkdirAll(root, 0o750); err != nil {
+	// Resolve once: storage_path in API responses must be absolute even when
+	// the configured root is relative to the working directory.
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve storage root: %w", err)
+	}
+	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return nil, fmt.Errorf("create storage root: %w", err)
 	}
-	return &Local{root: root}, nil
+	return &Local{root: abs}, nil
 }
 
 func (l *Local) Save(_ context.Context, staged *StagedFile, filename, _ string) (string, error) {

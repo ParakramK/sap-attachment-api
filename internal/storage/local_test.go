@@ -58,6 +58,27 @@ func TestObjectPathLayout(t *testing.T) {
 	}
 }
 
+// TestNewLocalResolvesRelativeRoot: the API contract promises an absolute
+// storage_path even when STORAGE_DIR is relative to the working directory.
+func TestNewLocalResolvesRelativeRoot(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := NewLocal("./storage/under/cwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref := l.Reference("aa/abc.pdf"); !filepath.IsAbs(ref) {
+		t.Fatalf("reference = %q, want absolute", ref)
+	}
+}
+
 func TestLocalSaveHasDeleteReference(t *testing.T) {
 	l := newLocal(t)
 	ctx := context.Background()
