@@ -63,6 +63,11 @@ func (l *Local) Reference(rel string) string {
 	return filepath.Join(l.root, filepath.FromSlash(rel))
 }
 
+func (l *Local) Name() string { return "local" }
+
+// Close releases backend resources; the local backend holds none.
+func (l *Local) Close() error { return nil }
+
 // syncDir flushes the directory entry so a rename survives a crash.
 func syncDir(dir string) {
 	d, err := os.Open(dir) //nolint:gosec // G304: dir is an internally derived path, never client input

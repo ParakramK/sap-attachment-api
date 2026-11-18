@@ -22,13 +22,13 @@ import (
 // dedupes by content, commits atomically and maintains the DB lifecycle.
 type Uploader struct {
 	repo       *db.Repo
-	store      *storage.Local
+	store      storage.Storage
 	stagingDir string
 	maxBytes   int64
 	now        func() time.Time
 }
 
-func NewUploader(repo *db.Repo, store *storage.Local, stagingDir string, maxBytes int64) (*Uploader, error) {
+func NewUploader(repo *db.Repo, store storage.Storage, stagingDir string, maxBytes int64) (*Uploader, error) {
 	if err := os.MkdirAll(stagingDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create staging dir: %w", err)
 	}
@@ -79,7 +79,7 @@ func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, de
 	a.SizeBytes = staged.Size
 	a.SHA256 = staged.SHA256
 	a.Status = db.StatusStaged
-	a.Backend = "local"
+	a.Backend = u.store.Name()
 	a.ObjectPath = storage.ObjectPath(staged.SHA256, a.Filename)
 	a.CreatedAt = u.now()
 	a.UpdatedAt = a.CreatedAt

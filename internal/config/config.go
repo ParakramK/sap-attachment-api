@@ -25,8 +25,23 @@ type Config struct {
 	LogtailLevel string `env:"LOGTAIL_LEVEL" env-default:"info"`
 
 	StorageDir string `env:"STORAGE_DIR" env-default:"./data/storage"`
-	StagingDir string `env:"STAGING_DIR" env-default:"./data/staging"`
+	StagingDir string `env:"STAGING_DIR" env-default:"./data/staging"` // scratch space; always local
 	DBPath     string `env:"DB_PATH" env-default:"./data/attachments.db"`
+
+	// Storage backend: local filesystem, or a remote SMB2/3 share the service
+	// speaks to directly (no OS mount needed).
+	StorageBackend string `env:"STORAGE_BACKEND" env-default:"local"` // local | smb
+
+	// SMB backend settings (used when STORAGE_BACKEND=smb).
+	SMBServer   string `env:"SMB_SERVER"` // host or host:port (default port 445)
+	SMBShare    string `env:"SMB_SHARE"`
+	SMBUsername string `env:"SMB_USERNAME"`
+	SMBPassword string `env:"SMB_PASSWORD"` // secret
+	SMBDomain   string `env:"SMB_DOMAIN"`   // optional AD domain
+	// Require SMB3 message signing (integrity); disable only for legacy NAS.
+	SMBRequireSigning bool `env:"SMB_REQUIRE_SIGNING" env-default:"true"`
+	// Where commits are staged inside the share before the atomic rename.
+	SMBStagingDir string `env:"SMB_STAGING_DIR" env-default:"staging"`
 
 	// Remote-source fetcher settings: used when ingesting from S3 URIs.
 	// Credentials fall back to the AWS default credential chain (IAM role).
@@ -79,6 +94,22 @@ func (c Config) Validate() error {
 	}
 	if c.StorageDir == "" || c.DBPath == "" || c.StagingDir == "" {
 		return errors.New("STORAGE_DIR, STAGING_DIR and DB_PATH must not be empty")
+	}
+	switch c.StorageBackend {
+	case "local":
+	case "smb":
+		if c.SMBServer == "" || c.SMBShare == "" || c.SMBUsername == "" || c.SMBPassword == "" {
+			return errors.New("STORAGE_BACKEND=smb requires SMB_SERVER, SMB_SHARE, SMB_USERNAME and SMB_PASSWORD")
+		}
+		if c.SMBStagingDir == "" {
+			return errors.New("SMB_STAGING_DIR must not be empty")
+		}
+		if strings.HasPrefix(c.SMBStagingDir, "/") || strings.Contains(c.SMBStagingDir, `\`) ||
+			strings.Contains(c.SMBStagingDir, "..") {
+			return errors.New("SMB_STAGING_DIR must be a share-relative path without .. or backslashes")
+		}
+	default:
+		return fmt.Errorf("STORAGE_BACKEND must be local or smb, got %q", c.StorageBackend)
 	}
 	if (c.S3AccessKey == "") != (c.S3SecretKey == "") {
 		return errors.New("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together (or both omitted to use the AWS default credential chain)")

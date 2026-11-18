@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/parakram/sap-attachment-api/internal/config"
 	"github.com/parakram/sap-attachment-api/internal/db"
 	"github.com/parakram/sap-attachment-api/internal/storage"
@@ -17,11 +19,22 @@ import (
 type fixture struct {
 	uploader *Uploader
 	repo     *db.Repo
-	store    *storage.Local
+	d        *bun.DB
+	store    storage.Storage
+	sweeper  *Sweeper
 	dir      string
 }
 
 func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	store, err := storage.NewLocal(filepath.Join(t.TempDir(), "storage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newFixtureWithBackend(t, store)
+}
+
+func newFixtureWithBackend(t *testing.T, backend storage.Storage) *fixture {
 	t.Helper()
 	cfg := &config.Config{DBPath: t.TempDir() + "/test.db"}
 	d, err := db.Open(cfg)
@@ -32,14 +45,9 @@ func newFixture(t *testing.T) *fixture {
 
 	dir := t.TempDir()
 	staging := filepath.Join(dir, "staging")
-	storageRoot := filepath.Join(dir, "storage")
 
 	repo := db.NewRepo(d)
-	store, err := storage.NewLocal(storageRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewUploader(repo, store, staging, 1<<20)
+	u, err := NewUploader(repo, backend, staging, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +56,14 @@ func newFixture(t *testing.T) *fixture {
 	var seq int
 	u.now = func() time.Time { seq++; return base.Add(time.Duration(seq) * time.Second) }
 
-	return &fixture{uploader: u, repo: repo, store: store, dir: dir}
+	return &fixture{
+		uploader: u,
+		repo:     repo,
+		d:        d,
+		store:    backend,
+		sweeper:  NewSweeper(repo, backend, staging, time.Hour),
+		dir:      dir,
+	}
 }
 
 func TestUploadDirect(t *testing.T) {

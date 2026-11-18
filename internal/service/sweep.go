@@ -15,19 +15,22 @@ import (
 )
 
 // Sweeper reconciles storage and the database:
-//   - removes orphan temp files left in the staging directory by crashes
+//   - removes orphan temp files left in the local staging directory by
+//     crashes (uploads always stage locally; the SMB backend's staging dir
+//     inside the share is deliberately not listed — a crash mid-copy can
+//     leave an inert .tmp there, cleaned up by hand)
 //   - resolves rows stuck in staged: object present -> mark available,
 //     object absent -> delete the row
 //
 // Run at startup and on demand (admin endpoint) after crashes or upgrades.
 type Sweeper struct {
 	repo         *db.Repo
-	backend      *storage.Local
-	stagingDir   string
+	backend      storage.Storage
+	stagingDir   string // the local scratch dir; uploads always stage here
 	maxStagedAge time.Duration
 }
 
-func NewSweeper(repo *db.Repo, backend *storage.Local, stagingDir string, maxStagedAge time.Duration) *Sweeper {
+func NewSweeper(repo *db.Repo, backend storage.Storage, stagingDir string, maxStagedAge time.Duration) *Sweeper {
 	return &Sweeper{repo: repo, backend: backend, stagingDir: stagingDir, maxStagedAge: maxStagedAge}
 }
 

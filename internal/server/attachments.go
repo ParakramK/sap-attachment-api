@@ -32,7 +32,7 @@ type attachmentResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func toResponse(a *db.Attachment, store *storage.Local) attachmentResponse {
+func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
 	return attachmentResponse{
 		ID:          a.ID,
 		Filename:    a.Filename,

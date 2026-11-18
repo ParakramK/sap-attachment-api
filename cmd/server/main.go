@@ -44,7 +44,7 @@ func run() error {
 	}
 	defer func() { _ = database.Close() }()
 
-	backend, err := storage.NewLocal(cfg.StorageDir)
+	backend, err := storage.New(cfg)
 	if err != nil {
 		return fmt.Errorf("init storage backend: %w", err)
 	}
@@ -106,6 +106,9 @@ func run() error {
 	defer cancel()
 	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	if err := backend.Close(); err != nil {
+		log.Warn("storage backend close failed", "err", err)
 	}
 
 	closeLogs(shutdownCtx)

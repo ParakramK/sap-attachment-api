@@ -30,7 +30,7 @@ type Deps struct {
 	Log      *slog.Logger
 	Ready    func(context.Context) error
 	Repo     *db.Repo
-	Store    *storage.Local
+	Store    storage.Storage
 	Uploader *service.Uploader
 	Fetcher  *fetch.Fetcher
 }

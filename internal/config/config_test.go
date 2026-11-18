@@ -16,6 +16,7 @@ func validConfig() Config {
 		StorageDir:      "./data/storage",
 		StagingDir:      "./data/staging",
 		DBPath:          "./data/attachments.db",
+		StorageBackend:  "local",
 		S3Region:        "us-east-1",
 		MaxUploadMB:     50,
 		FetchTimeout:    60 * time.Second,
@@ -76,6 +77,55 @@ func TestValidateS3CredentialsRules(t *testing.T) {
 	c.S3SecretKey = "secret"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("s3 with static creds should pass: %v", err)
+	}
+}
+
+func TestValidateSMBBackendRules(t *testing.T) {
+	smbConfig := func() Config {
+		c := validConfig()
+		c.StorageBackend = "smb"
+		c.SMBServer = "192.168.1.10"
+		c.SMBShare = "attachment"
+		c.SMBUsername = "svc"
+		c.SMBPassword = "secret"
+		c.SMBStagingDir = "staging"
+		return c
+	}
+
+	c := smbConfig()
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid smb config rejected: %v", err)
+	}
+
+	for _, drop := range []string{"SMBServer", "SMBShare", "SMBUsername", "SMBPassword"} {
+		c := smbConfig()
+		switch drop {
+		case "SMBServer":
+			c.SMBServer = ""
+		case "SMBShare":
+			c.SMBShare = ""
+		case "SMBUsername":
+			c.SMBUsername = ""
+		case "SMBPassword":
+			c.SMBPassword = ""
+		}
+		if err := c.Validate(); err == nil {
+			t.Errorf("expected error when %s is empty", drop)
+		}
+	}
+
+	for _, bad := range []string{"/abs", `back\slash`, "up/../dir", "with..dots"} {
+		c := smbConfig()
+		c.SMBStagingDir = bad
+		if err := c.Validate(); err == nil {
+			t.Errorf("expected error for staging dir %q", bad)
+		}
+	}
+
+	c = smbConfig()
+	c.SMBStagingDir = "sales/staged"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("nested staging dir rejected: %v", err)
 	}
 }
 
