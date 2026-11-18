@@ -39,6 +39,15 @@ type Config struct {
 	APIKeys     []string `env:"API_KEYS" env-separator:","`
 	MaxUploadMB int      `env:"MAX_UPLOAD_MB" env-default:"50"`
 
+	// Remote-source fetcher: rejects connections to private/reserved networks
+	// (SSRF defense). Enable only for deployments whose remote sources are
+	// themselves on private networks.
+	FetchAllowPrivateNet bool `env:"FETCH_ALLOW_PRIVATE_NET" env-default:"false"`
+	// Optional allowlist for s3:// sources; empty = any bucket the
+	// credentials can read.
+	S3AllowedBuckets []string `env:"S3_ALLOWED_BUCKETS" env-separator:","`
+	FetchTimeout     time.Duration `env:"FETCH_TIMEOUT" env-default:"60s"`
+
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-default:"15s"`
 }
 
@@ -85,6 +94,9 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		return errors.New("SHUTDOWN_TIMEOUT must be positive")
+	}
+	if c.FetchTimeout <= 0 {
+		return errors.New("FETCH_TIMEOUT must be positive")
 	}
 	return nil
 }
