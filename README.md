@@ -3,14 +3,16 @@
 Production-grade file ingestion service for internal SAP Business One
 integration: receives attachments as direct uploads or by downloading a
 remote source (HTTP URL or S3 object), stores them on the local filesystem
-with content checksums, and exposes metadata over a documented HTTP API.
-SAP reads the stored files directly from the `storage_path` in the response.
+or an SMB share with content checksums, and exposes metadata over a
+documented HTTP API. SAP reads the stored files directly from the
+`storage_path` in the response.
 
 ## Stack
 
 - Go 1.27, [Fiber v3](https://docs.gofiber.io)
 - SQLite (WAL) via [Bun](https://bun.uptrace.dev) + pure-Go `modernc.org/sqlite`
-- Local filesystem storage (atomic staged writes)
+- Local filesystem storage (atomic staged writes), or a remote SMB share
+  spoken directly by the service (SMB2/3, no OS mount)
 - Structured JSON logging (`slog`), optional Better Stack remote sink
 - OpenAPI 3 contract served at `/openapi.yaml`, interactive docs at `/docs`
 
@@ -63,6 +65,26 @@ retention mechanism — no automatic expiry).
 - Retries should carry `X-Idempotency-Key` (UUID): the original response is
   replayed instead of re-uploading. Keys are scoped per API key.
 
+## Storage backends
+
+`STORAGE_BACKEND=local` (default) writes to a local directory; `storage_path`
+in API responses is the absolute disk path SAP reads.
+
+`STORAGE_BACKEND=smb` speaks SMB2/3 directly — no mount needed. The service
+signs in with a service account (NTLMv2), stages each upload in a staging
+folder inside the share and atomically renames it into place; `storage_path`
+becomes the Windows UNC path (`\\server\share\ab\abcdef….pdf`). The SAP side
+must itself have access to the same share.
+
+```sh
+STORAGE_BACKEND=smb
+SMB_SERVER=192.168.1.10        # or host:port
+SMB_SHARE=attachment
+SMB_USERNAME=sap-attachments
+SMB_PASSWORD=...               # secret
+SMB_DOMAIN=CORP                # optional
+```
+
 ## Configuration (environment)
 
 | Variable               | Default                  | Description                                    |
@@ -73,8 +95,16 @@ retention mechanism — no automatic expiry).
 | `LOGTAIL_TOKEN`        | –                        | Better Stack source token (secret)             |
 | `LOGTAIL_LEVEL`        | `info`                   | Minimum level shipped to Better Stack          |
 | `STORAGE_DIR`          | `./data/storage`         | Attachment storage directory                   |
-| `STAGING_DIR`          | `./data/staging`         | Upload staging directory                       |
+| `STAGING_DIR`          | `./data/staging`         | Upload staging directory (always local scratch) |
 | `DB_PATH`              | `./data/attachments.db`  | SQLite database path                           |
+| `STORAGE_BACKEND`      | `local`                  | `local` or `smb` (service speaks SMB directly)  |
+| `SMB_SERVER`           | –                        | SMB host or host:port (when backend is smb)    |
+| `SMB_SHARE`            | –                        | Share name                                     |
+| `SMB_USERNAME`         | –                        | Service-account user (NTLMv2)                  |
+| `SMB_PASSWORD`         | –                        | Service-account password (secret)              |
+| `SMB_DOMAIN`           | –                        | Optional AD domain                             |
+| `SMB_REQUIRE_SIGNING`  | `true`                   | Require SMB3 message signing                   |
+| `SMB_STAGING_DIR`      | `staging`                | Commit staging dir inside the share            |
 | `API_KEYS`             | –                        | Comma-separated API keys (secret)              |
 | `MAX_UPLOAD_MB`        | `50`                     | Max upload size in megabytes                   |
 | `FETCH_ALLOW_PRIVATE_NET` | `false`               | Allow fetching private/reserved network hosts  |

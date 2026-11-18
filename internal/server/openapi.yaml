@@ -5,7 +5,7 @@ info:
     File ingestion service for SAP Business One integration. Receives
     attachments as a direct multipart upload or by downloading a remote
     source (http(s) URL or s3://bucket/key URI), stores the file on the
-    local filesystem, and returns metadata — including the absolute
+    local filesystem or an SMB share, and returns metadata — including the
     `storage_path` that the SAP integration reads the file from.
 
     All `/v1` endpoints require the `X-API-Key` header. Retries should
@@ -207,7 +207,11 @@ components:
           enum: [available]
         storage_path:
           type: string
-          description: Absolute local disk path where the stored file lives; the SAP integration reads from here.
+          description: |
+            Where the SAP integration reads the stored file: the absolute
+            local disk path (STORAGE_BACKEND=local) or the Windows UNC path
+            of the object on the SMB share (STORAGE_BACKEND=smb, e.g.
+            \\server\share\ab\abcdef….pdf).
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     Error:
