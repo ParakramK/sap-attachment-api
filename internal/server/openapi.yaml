@@ -122,15 +122,6 @@ paths:
               schema: { $ref: "#/components/schemas/Attachment" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-    delete:
-      tags: [attachments]
-      summary: Delete an attachment (removes the stored file and its record)
-      security: [{ ApiKeyAuth: [] }]
-      responses:
-        "204":
-          description: Deleted
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     ApiKeyAuth:

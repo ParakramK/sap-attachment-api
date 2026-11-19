@@ -419,31 +419,20 @@ func TestIdempotencyKeyRequired(t *testing.T) {
 	}
 }
 
-func TestDeleteAttachment(t *testing.T) {
+func TestDeleteEndpointDisabled(t *testing.T) {
 	f := newAPI(t, nil, nil)
 	created := decode[attachmentShape](t, doMultipart(t, f.app, "/v1/attachments", "gone.pdf", "%PDF-1.4 gone", ""))
-	path := created.StoragePath
-
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("object missing before delete: %v", err)
-	}
 
 	resp := doJSON(t, f.app, http.MethodDelete, "/v1/attachments/"+created.ID, "", "")
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete status = %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("DELETE status = %d, want 405/404 (endpoint disabled)", resp.StatusCode)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("stored object not removed")
-	}
-
+	// Nothing was removed.
 	resp = doJSON(t, f.app, http.MethodGet, "/v1/attachments/"+created.ID, "", "")
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("get after delete = %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET after DELETE = %d, want 200", resp.StatusCode)
 	}
-
-	// Deleting again is a clean 404.
-	resp = doJSON(t, f.app, http.MethodDelete, "/v1/attachments/"+created.ID, "", "")
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("re-delete = %d", resp.StatusCode)
+	if _, err := os.Stat(created.StoragePath); err != nil {
+		t.Fatalf("stored object was removed: %v", err)
 	}
 }

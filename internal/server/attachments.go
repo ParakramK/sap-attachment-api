@@ -189,25 +189,3 @@ func getAttachment(d Deps) fiber.Handler {
 		return c.JSON(toResponse(att, d.Store))
 	}
 }
-
-func deleteAttachment(d Deps) fiber.Handler {
-	return func(c fiber.Ctx) error {
-		att, err := d.Repo.ByID(c.Context(), c.Params("id"))
-		if err != nil {
-			return fiber.NewError(http.StatusInternalServerError, "lookup failed")
-		}
-		if att == nil {
-			return fiber.NewError(http.StatusNotFound, "attachment not found")
-		}
-
-		// Object removal first: if it fails, the row stays and DELETE can be
-		// retried. Removal is idempotent for missing objects.
-		if err := d.Store.Delete(c.Context(), att.ObjectPath); err != nil {
-			return fiber.NewError(http.StatusInternalServerError, "failed to remove stored object")
-		}
-		if err := d.Repo.Delete(c.Context(), att.ID); err != nil {
-			return fiber.NewError(http.StatusInternalServerError, "failed to delete attachment")
-		}
-		return c.SendStatus(http.StatusNoContent)
-	}
-}

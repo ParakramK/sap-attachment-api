@@ -33,7 +33,6 @@ Every `/v1` endpoint needs `X-API-Key`; every POST needs a UUID
 | ------ | -------------------------- | ------------------------------------------------ |
 | POST   | `/v1/attachments`          | Multipart `file` part, or JSON `source_url` / `source_uri` |
 | GET    | `/v1/attachments/{id}`     | Metadata                                         |
-| DELETE | `/v1/attachments/{id}`     | Remove the file and its record                   |
 
 Only PDF and image bytes are accepted (sniffed from content, not the filename);
 anything else returns `415`. Duplicate content returns the original record

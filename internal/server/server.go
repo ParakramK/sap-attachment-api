@@ -121,7 +121,6 @@ func New(d Deps) *fiber.App {
 		}),
 		createAttachment(d))
 	v1.Get("/attachments/:id", getAttachment(d))
-	v1.Delete("/attachments/:id", deleteAttachment(d))
 
 	return app
 }
