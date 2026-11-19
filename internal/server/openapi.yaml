@@ -215,7 +215,9 @@ components:
             Where the SAP integration reads the stored file: the absolute
             local disk path (STORAGE_BACKEND=local) or the Windows UNC path
             of the object on the SMB share (STORAGE_BACKEND=smb, e.g.
-            \\server\share\ab\abcdef….pdf).
+            \\server\share\temp\11111111-2222-4333-8444-555555555555.pdf).
+            The file name is the idempotency key plus the original extension;
+            SHA-256 is kept in the database only, never in the path.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     Error:

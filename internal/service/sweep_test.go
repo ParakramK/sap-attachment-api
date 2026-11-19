@@ -19,7 +19,7 @@ type fakeBackend struct {
 func newFakeBackend() *fakeBackend { return &fakeBackend{present: map[string]bool{}} }
 
 func (f *fakeBackend) Save(_ context.Context, staged *storage.StagedFile, filename, _ string) (string, error) {
-	rel := storage.ObjectPath(staged.SHA256, filename)
+	rel := filename
 	f.present[rel] = true
 	_ = staged.Discard()
 	return rel, nil

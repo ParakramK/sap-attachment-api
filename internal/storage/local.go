@@ -31,7 +31,7 @@ func NewLocal(root string) (*Local, error) {
 }
 
 func (l *Local) Save(_ context.Context, staged *StagedFile, filename, _ string) (string, error) {
-	rel := ObjectPath(staged.SHA256, filename)
+	rel := filename
 	dest := filepath.Join(l.root, filepath.FromSlash(rel))
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {

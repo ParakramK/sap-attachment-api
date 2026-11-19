@@ -185,8 +185,8 @@ func TestUploadUsesIdempotencyKeyAsFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := key + ".pdf" // extension from the original file, lowercased
-	if att.Filename != want || !strings.HasSuffix(att.ObjectPath, "/"+want) {
-		t.Fatalf("filename = %q, path = %q, want name %q", att.Filename, att.ObjectPath, want)
+	if att.Filename != want || att.ObjectPath != want {
+		t.Fatalf("filename = %q, path = %q, want %q", att.Filename, att.ObjectPath, want)
 	}
 	if len(att.Filename) > 60 {
 		t.Fatalf("filename too long: %q", att.Filename)

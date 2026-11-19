@@ -80,7 +80,7 @@ in API responses is the absolute disk path SAP reads.
 `STORAGE_BACKEND=smb` speaks SMB2/3 directly — no mount needed. The service
 signs in with a service account (NTLMv2), stages each upload in a staging
 folder inside the share and atomically renames it into place; `storage_path`
-becomes the Windows UNC path (`\\server\share\ab\<idempotency-key>.pdf`). The SAP side
+becomes the Windows UNC path (`\\server\share\<base-dir>\<idempotency-key>.pdf`). The SAP side
 must itself have access to the same share. SQLite (`DB_PATH`) and the upload
 scratch directory (`STAGING_DIR`) always stay on local disk.
 

@@ -95,7 +95,7 @@ func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, de
 	a.SHA256 = staged.SHA256
 	a.Status = db.StatusStaged
 	a.Backend = u.store.Name()
-	a.ObjectPath = storage.ObjectPath(staged.SHA256, a.Filename)
+	a.ObjectPath = a.Filename
 	a.CreatedAt = u.now()
 	a.UpdatedAt = a.CreatedAt
 

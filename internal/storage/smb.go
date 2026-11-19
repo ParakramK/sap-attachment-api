@@ -133,15 +133,19 @@ func (s *SMB) withShare(ctx context.Context, op func(sh *smb2.Share) error) erro
 func (s *SMB) Save(ctx context.Context, staged *StagedFile, filename, _ string) (string, error) {
 	defer func() { _ = staged.Discard() }()
 
-	rel := path.Join(s.base, ObjectPath(staged.SHA256, filename))
+	// The idempotency key (plus its bounded extension) is the whole file
+	// name; the optional SMB base folder is its only parent.
+	rel := path.Join(s.base, filename)
 	tmp := s.staging + "/" + staged.SHA256 + "-" + randToken() + ".tmp"
 
 	err := s.withShare(ctx, func(sh *smb2.Share) error {
 		if err := sh.MkdirAll(s.staging, 0o750); err != nil {
 			return fmt.Errorf("smb create staging dir: %w", err)
 		}
-		if err := sh.MkdirAll(path.Dir(rel), 0o750); err != nil {
-			return fmt.Errorf("smb create object dir: %w", err)
+		if dir := path.Dir(rel); dir != "." {
+			if err := sh.MkdirAll(dir, 0o750); err != nil {
+				return fmt.Errorf("smb create object dir: %w", err)
+			}
 		}
 
 		src, err := os.Open(staged.Path) //nolint:gosec // G304: path is internally derived

@@ -3,8 +3,6 @@ package storage
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -48,13 +46,14 @@ func TestExtSanitization(t *testing.T) {
 	}
 }
 
-func TestObjectPathLayout(t *testing.T) {
-	got := ObjectPath(strings.Repeat("a", 64), "11111111-2222-4333-8444-555555555555.pdf")
-	if !strings.HasPrefix(got, "aa/") || !strings.HasSuffix(got, "11111111-2222-4333-8444-555555555555.pdf") {
-		t.Fatalf("unexpected path %q", got)
+func TestExtExtractsBoundedOriginalExtension(t *testing.T) {
+	// The only part of a client filename that survives is its short
+	// extension; the idempotency key itself is the whole stored file name.
+	if got := Ext("a-very-long-customer-name.PDF"); got != ".pdf" {
+		t.Fatalf("Ext = %q, want .pdf", got)
 	}
-	if n := strings.Count(got, "/"); n != 1 {
-		t.Fatalf("path traversal risk in %q", got)
+	if got := Ext(strings.Repeat("a", 300) + ".tar.gz"); got != ".gz" {
+		t.Fatalf("Ext = %q, want .gz", got)
 	}
 }
 
@@ -85,15 +84,12 @@ func TestLocalSaveHasDeleteReference(t *testing.T) {
 	dir := t.TempDir()
 
 	staged := stagedContent(t, dir, "file content")
-	sha := staged.SHA256
 
 	rel, err := l.Save(ctx, staged, "report.pdf", "application/pdf")
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	// The file name is the caller-supplied name (idempotency key + extension),
-	// never the 64-char digest: Windows paths must stay short.
-	wantRel := sha[:2] + "/report.pdf"
+	wantRel := "report.pdf"
 	if rel != wantRel {
 		t.Fatalf("rel = %q, want %q", rel, wantRel)
 	}
@@ -142,12 +138,11 @@ func TestLocalSaveSameContentOverwrites(t *testing.T) {
 	}
 
 	second := stagedContent(t, dir, "same content")
-	if _, err := l.Save(ctx, second, "b.txt", "text/plain"); err != nil {
+	if _, err := l.Save(ctx, second, "a.txt", "text/plain"); err != nil {
 		t.Fatal(err)
 	}
 
-	sum := sha256.Sum256([]byte("same content"))
-	has, _ := l.Has(ctx, ObjectPath(hex.EncodeToString(sum[:]), "a.txt"))
+	has, _ := l.Has(ctx, "a.txt")
 	if !has {
 		t.Fatal("overwritten object missing")
 	}
