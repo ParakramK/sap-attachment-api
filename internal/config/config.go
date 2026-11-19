@@ -10,10 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -70,6 +72,12 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	// .env is optional. godotenv.Load never overrides variables already in
+	// the real environment, so precedence is: OS env > .env > defaults.
+	// (In containers .env is excluded by .dockerignore; only OS env applies.)
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("load .env: %w", err)
+	}
 	var c Config
 	if err := cleanenv.ReadEnv(&c); err != nil {
 		return nil, fmt.Errorf("read environment: %w", err)
@@ -97,6 +105,11 @@ func (c Config) Validate() error {
 	}
 	if c.StorageDir == "" || c.DBPath == "" || c.StagingDir == "" {
 		return errors.New("STORAGE_DIR, STAGING_DIR and DB_PATH must not be empty")
+	}
+	// SQLite needs local, coherent file locking: never run the DB on SMB/NFS.
+	// Only attachments may live on the SMB share.
+	if strings.HasPrefix(c.DBPath, `\\`) || strings.HasPrefix(c.DBPath, "//") {
+		return errors.New("DB_PATH must be local; SQLite cannot run on SMB/NFS shares")
 	}
 	switch c.StorageBackend {
 	case "local":

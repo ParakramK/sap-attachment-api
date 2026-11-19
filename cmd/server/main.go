@@ -48,6 +48,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init storage backend: %w", err)
 	}
+	log.Info("storage configured",
+		"backend", cfg.StorageBackend,
+		"smb_share", cfg.SMBShare,
+		"smb_base_dir", cfg.SMBBaseDir)
 
 	repo := db.NewRepo(database)
 

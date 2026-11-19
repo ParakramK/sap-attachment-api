@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -146,5 +148,64 @@ func TestLevelParsing(t *testing.T) {
 	}
 	if got := c.MaxUploadBytes(); got != 50<<20 {
 		t.Fatalf("MaxUploadBytes() = %d, want %d", got, 50<<20)
+	}
+}
+
+func TestLoadReadsDotEnvAndEnvWins(t *testing.T) {
+	dir := t.TempDir()
+	content := "APP_ENV=dev\nADDR=:8080\nAPI_KEYS=from-file\nMAX_UPLOAD_MB=7\n" +
+		"STORAGE_BACKEND=smb\nSMB_SERVER=10.0.0.1\nSMB_SHARE=nas\n" +
+		"SMB_USERNAME=u\nSMB_PASSWORD=p\nDB_PATH=./data/attachments.db\n" +
+		"STORAGE_DIR=./data/storage\nSTAGING_DIR=./data/staging\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	keys := []string{"APP_ENV", "ADDR", "API_KEYS", "MAX_UPLOAD_MB", "STORAGE_BACKEND",
+		"SMB_SERVER", "SMB_SHARE", "SMB_USERNAME", "SMB_PASSWORD", "DB_PATH",
+		"STORAGE_DIR", "STAGING_DIR"}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+		for _, k := range keys {
+			_ = os.Unsetenv(k)
+		}
+	})
+	for _, k := range keys {
+		_ = os.Unsetenv(k)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+	if c.StorageBackend != "smb" || c.MaxUploadMB != 7 || len(c.APIKeys) != 1 || c.APIKeys[0] != "from-file" {
+		t.Fatalf("file values not applied: backend=%q max=%d keys=%v", c.StorageBackend, c.MaxUploadMB, c.APIKeys)
+	}
+
+	// A real environment variable overrides the file value.
+	t.Setenv("STORAGE_BACKEND", "local")
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("load with env override: %v", err)
+	}
+	if c.StorageBackend != "local" {
+		t.Fatalf("env did not override .env: %q", c.StorageBackend)
+	}
+}
+
+func TestValidateDBPathMustBeLocal(t *testing.T) {
+	for _, bad := range []string{`\\nas\share\attachments.db`, "//nas/share/attachments.db"} {
+		c := validConfig()
+		c.DBPath = bad
+		if err := c.Validate(); err == nil {
+			t.Errorf("expected error for remote DB_PATH %q", bad)
+		}
 	}
 }

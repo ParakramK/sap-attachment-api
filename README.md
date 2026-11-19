@@ -23,6 +23,9 @@ cp .env.example .env   # optional: tune via environment variables
 make run               # dev mode on :8080
 ```
 
+`.env` is loaded at startup (real environment variables win over it). In
+Docker, pass variables directly — `.env` is not bundled into the image.
+
 Health: `GET /healthz` · Readiness: `GET /readyz` · Docs: `GET /docs`
 
 ## API
@@ -77,8 +80,9 @@ in API responses is the absolute disk path SAP reads.
 `STORAGE_BACKEND=smb` speaks SMB2/3 directly — no mount needed. The service
 signs in with a service account (NTLMv2), stages each upload in a staging
 folder inside the share and atomically renames it into place; `storage_path`
-becomes the Windows UNC path (`\\server\share\ab\abcdef….pdf`). The SAP side
-must itself have access to the same share.
+becomes the Windows UNC path (`\\server\share\ab\<idempotency-key>.pdf`). The SAP side
+must itself have access to the same share. SQLite (`DB_PATH`) and the upload
+scratch directory (`STAGING_DIR`) always stay on local disk.
 
 ```sh
 STORAGE_BACKEND=smb
@@ -101,7 +105,7 @@ SMB_DOMAIN=CORP                # optional
 | `LOGTAIL_LEVEL`        | `info`                   | Minimum level shipped to Better Stack          |
 | `STORAGE_DIR`          | `./data/storage`         | Attachment storage directory                   |
 | `STAGING_DIR`          | `./data/staging`         | Upload staging directory (always local scratch) |
-| `DB_PATH`              | `./data/attachments.db`  | SQLite database path                           |
+| `DB_PATH`              | `./data/attachments.db`  | SQLite database path — **always local**, also with the SMB backend |
 | `STORAGE_BACKEND`      | `local`                  | `local` or `smb` (service speaks SMB directly)  |
 | `SMB_SERVER`           | –                        | SMB host or host:port (when backend is smb)    |
 | `SMB_SHARE`            | –                        | Share name (e.g. `nas` for `\\IP\nas\attachments`) |
