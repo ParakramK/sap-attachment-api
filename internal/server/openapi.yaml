@@ -8,9 +8,9 @@ info:
     local filesystem or an SMB share, and returns metadata — including the
     `storage_path` that the SAP integration reads the file from.
 
-    All `/v1` endpoints require the `X-API-Key` header. Retries should
-    carry an `X-Idempotency-Key` (UUID): the original response is replayed
-    instead of storing the content twice.
+    All `/v1` endpoints require the `X-API-Key` header. Every POST must also
+    carry `X-Idempotency-Key` (UUID): the original response is replayed on
+    retries instead of storing the content twice.
   version: 1.0.0
 servers:
   - url: /
@@ -146,8 +146,8 @@ components:
     IdempotencyKey:
       name: X-Idempotency-Key
       in: header
-      required: false
-      description: UUID. Repeated requests with the same key replay the original response instead of re-uploading.
+      required: true
+      description: UUID. Required on every POST; repeated requests with the same key replay the original response instead of re-uploading.
       schema: { type: string, format: uuid }
   responses:
     BadRequest:
@@ -194,7 +194,11 @@ components:
           format: uuid
         filename:
           type: string
-          description: Sanitized display name; path separators removed.
+          description: |
+            The idempotency key plus the original file's lowercase extension
+            (e.g. 11111111-2222-4333-8444-555555555555.pdf). The client's
+            filename itself is never stored — only its bounded extension —
+            so Windows paths stay short.
         content_type:
           type: string
           description: Server-sniffed MIME type (client-supplied types are not trusted).

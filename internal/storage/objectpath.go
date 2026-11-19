@@ -6,10 +6,11 @@ import (
 )
 
 // ObjectPath returns the backend-neutral relative path for committed content:
-// <sha-prefix>/<sha256><ext>. The hash prefix spreads files over directories;
-// the extension keeps the object recognizable on disk.
+// <sha-prefix>/<filename>. The hash prefix spreads files over directories and
+// disambiguates an idempotency key reused with different content; the file name
+// is the idempotency key plus the original extension (bounded, Windows-safe).
 func ObjectPath(sha256, filename string) string {
-	return sha256[:2] + "/" + sha256 + Ext(filename)
+	return sha256[:2] + "/" + filename
 }
 
 // Ext extracts a safe extension (".pdf") from a filename: lowercase

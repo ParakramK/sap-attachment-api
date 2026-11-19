@@ -171,6 +171,28 @@ func TestUploadEmptyFile(t *testing.T) {
 	}
 }
 
+func TestUploadUsesIdempotencyKeyAsFilename(t *testing.T) {
+	f := newFixture(t)
+	key := "11111111-2222-4333-8444-555555555555"
+	longName := strings.Repeat("long-client-name-", 30) + ".PDF"
+
+	att, _, err := f.uploader.Upload(context.Background(), Input{
+		Reader:         strings.NewReader("%PDF-1.4 content"),
+		Filename:       longName,
+		IdempotencyKey: key,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := key + ".pdf" // extension from the original file, lowercased
+	if att.Filename != want || !strings.HasSuffix(att.ObjectPath, "/"+want) {
+		t.Fatalf("filename = %q, path = %q, want name %q", att.Filename, att.ObjectPath, want)
+	}
+	if len(att.Filename) > 60 {
+		t.Fatalf("filename too long: %q", att.Filename)
+	}
+}
+
 func TestSanitizeFilename(t *testing.T) {
 	cases := map[string]string{
 		"../../etc/passwd":  "passwd",

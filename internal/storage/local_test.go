@@ -49,8 +49,8 @@ func TestExtSanitization(t *testing.T) {
 }
 
 func TestObjectPathLayout(t *testing.T) {
-	got := ObjectPath(strings.Repeat("a", 64), "file.tar.gz")
-	if !strings.HasPrefix(got, "aa/") || !strings.HasSuffix(got, ".gz") {
+	got := ObjectPath(strings.Repeat("a", 64), "11111111-2222-4333-8444-555555555555.pdf")
+	if !strings.HasPrefix(got, "aa/") || !strings.HasSuffix(got, "11111111-2222-4333-8444-555555555555.pdf") {
 		t.Fatalf("unexpected path %q", got)
 	}
 	if n := strings.Count(got, "/"); n != 1 {
@@ -91,7 +91,9 @@ func TestLocalSaveHasDeleteReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	wantRel := sha[:2] + "/" + sha + ".pdf"
+	// The file name is the caller-supplied name (idempotency key + extension),
+	// never the 64-char digest: Windows paths must stay short.
+	wantRel := sha[:2] + "/report.pdf"
 	if rel != wantRel {
 		t.Fatalf("rel = %q, want %q", rel, wantRel)
 	}

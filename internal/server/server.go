@@ -107,9 +107,10 @@ func New(d Deps) *fiber.App {
 	v1 := app.Group("/v1")
 	v1.Use(apiKeyAuth(cfg.APIKeys))
 
-	// Retries with the same X-Idempotency-Key replay the original response
-	// instead of re-uploading; keys are scoped per authenticated caller.
+	// X-Idempotency-Key is mandatory on POSTs; the guard runs before the
+	// middleware so a rejected request is never cached as a replay.
 	v1.Post("/attachments",
+		requireIdempotencyKey,
 		idempotency.New(idempotency.Config{
 			KeyScope: func(c fiber.Ctx) string {
 				if caller, ok := c.Locals("caller").(string); ok {
@@ -123,6 +124,19 @@ func New(d Deps) *fiber.App {
 	v1.Delete("/attachments/:id", deleteAttachment(d))
 
 	return app
+}
+
+// requireIdempotencyKey rejects POSTs without a usable idempotency key.
+// Validation reuses the middleware's own rule so there is one source of truth.
+func requireIdempotencyKey(c fiber.Ctx) error {
+	key := c.Get("X-Idempotency-Key")
+	if key == "" {
+		return fiber.NewError(http.StatusBadRequest, "X-Idempotency-Key header is required")
+	}
+	if err := idempotency.ConfigDefault.KeyHeaderValidate(key); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid X-Idempotency-Key")
+	}
+	return c.Next()
 }
 
 // requestLogger emits one structured access-log entry per request, correlated

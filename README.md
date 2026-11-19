@@ -34,7 +34,7 @@ auth in dev). Errors use one envelope: `{"code", "message", "request_id"}`.
 
 ```sh
 curl -X POST http://localhost:8080/v1/attachments \
-  -H "X-API-Key: local-dev-key" \
+  -H "X-API-Key: local-dev-key" -H "X-Idempotency-Key: $(uuidgen)" \
   -F "file=@invoice.pdf"
 ```
 
@@ -42,11 +42,11 @@ curl -X POST http://localhost:8080/v1/attachments \
 
 ```sh
 curl -X POST http://localhost:8080/v1/attachments \
-  -H "X-API-Key: local-dev-key" -H "Content-Type: application/json" \
+  -H "X-API-Key: local-dev-key" -H "X-Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \
   -d '{"source_url": "https://example.com/report.pdf"}'
 
 curl -X POST http://localhost:8080/v1/attachments \
-  -H "X-API-Key: local-dev-key" -H "Content-Type: application/json" \
+  -H "X-API-Key: local-dev-key" -H "X-Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \
   -d '{"source_uri": "s3://my-bucket/invoices/2026-01.pdf"}'
 ```
 
@@ -62,8 +62,12 @@ retention mechanism — no automatic expiry).
 
 - Identical content is stored once: re-uploads return the original record
   with `200` instead of `201` (dedupe key: SHA-256).
-- Retries should carry `X-Idempotency-Key` (UUID): the original response is
-  replayed instead of re-uploading. Keys are scoped per API key.
+- Every POST must carry `X-Idempotency-Key` (UUID): the original response is
+  replayed on retries instead of re-uploading. Keys are scoped per API key.
+  Requests without a valid key are rejected with `400`. The key also becomes
+  the stored file name (`<key>.<original extension>`) — the client's filename
+  is never used as a path, only its short extension, to keep Windows paths
+  within limits.
 
 ## Storage backends
 

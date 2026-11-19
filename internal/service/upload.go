@@ -37,17 +37,25 @@ func NewUploader(repo *db.Repo, store storage.Storage, stagingDir string, maxByt
 
 // Input is one ingest source. Reader must yield the raw file content;
 // Filename may be empty. Size is the source-declared size or -1 when unknown
-// (informational only; the staged size is authoritative).
+// (informational only; the staged size is authoritative). IdempotencyKey, when
+// set, becomes the stored file name (plus the original extension) so paths
+// stay short and Windows-safe.
 type Input struct {
-	Reader   io.Reader
-	Filename string
-	Size     int64
+	Reader         io.Reader
+	Filename       string
+	Size           int64
+	IdempotencyKey string
 }
 
 // Upload stores the content. Dedupe: when this content hash is already
 // available, the existing attachment is returned with deduped=true and the
 // incoming bytes are discarded.
 func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, deduped bool, err error) {
+	// Remote sources hand us a body that must be closed after streaming.
+	if closer, ok := in.Reader.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
+	}
+
 	// Sniff the real content type from the first bytes; caller-supplied types
 	// are not trusted at this trust boundary.
 	br := bufio.NewReader(in.Reader)
@@ -74,7 +82,14 @@ func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, de
 	}
 
 	a := db.NewAttachment()
-	a.Filename = sanitizeFilename(in.Filename)
+	// The client's filename is never used as the stored name: it can be long
+	// enough to break Windows paths. The UUID key (plus the original file's
+	// short extension) is bounded and unique per request.
+	name := sanitizeFilename(in.Filename)
+	if in.IdempotencyKey != "" {
+		name = sanitizeFilename(in.IdempotencyKey + storage.Ext(in.Filename))
+	}
+	a.Filename = name
 	a.ContentType = contentType
 	a.SizeBytes = staged.Size
 	a.SHA256 = staged.SHA256

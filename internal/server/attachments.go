@@ -75,6 +75,7 @@ func createAttachment(d Deps) fiber.Handler {
 		if err != nil {
 			return err // already an API error
 		}
+		input.IdempotencyKey = c.Get("X-Idempotency-Key") // guaranteed by the middleware
 
 		att, deduped, err := d.Uploader.Upload(c.Context(), input)
 		if err != nil {

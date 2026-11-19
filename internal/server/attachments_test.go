@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -82,6 +83,7 @@ func doJSON(t *testing.T, app *fiber.App, method, path, body, apiKey string) *ht
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Idempotency-Key", newIdemKey())
 	if apiKey != "" {
 		req.Header.Set("X-API-Key", apiKey)
 	}
@@ -91,6 +93,14 @@ func doJSON(t *testing.T, app *fiber.App, method, path, body, apiKey string) *ht
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
+}
+
+// newIdemKey returns a fresh 36-char key: each request in tests must use a
+// different one, or the middleware replays the first response.
+var idemSeq atomic.Uint64
+
+func newIdemKey() string {
+	return fmt.Sprintf("11111111-2222-4333-8444-%012d", idemSeq.Add(1))
 }
 
 func multipartBody(t *testing.T, field, filename, content string) (string, string) {
@@ -111,10 +121,15 @@ func multipartBody(t *testing.T, field, filename, content string) (string, strin
 }
 
 func doMultipart(t *testing.T, app *fiber.App, path, filename, content, apiKey string) *http.Response {
+	return doMultipartWithKey(t, app, path, filename, content, apiKey, newIdemKey())
+}
+
+func doMultipartWithKey(t *testing.T, app *fiber.App, path, filename, content, apiKey, idemKey string) *http.Response {
 	t.Helper()
 	body, ct := multipartBody(t, "file", filename, content)
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", ct)
+	req.Header.Set("X-Idempotency-Key", idemKey)
 	if apiKey != "" {
 		req.Header.Set("X-API-Key", apiKey)
 	}
@@ -138,13 +153,17 @@ func decode[T any](t *testing.T, resp *http.Response) T {
 func TestCreateAndGetAttachment(t *testing.T) {
 	f := newAPI(t, nil, nil)
 
-	resp := doMultipart(t, f.app, "/v1/attachments", "invoice.pdf", "%PDF-1.4 content", "")
+	key := "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	resp := doMultipartWithKey(t, f.app, "/v1/attachments", "invoice.pdf", "%PDF-1.4 content", "", key)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	created := decode[attachmentShape](t, resp)
-	if created.Filename != "invoice.pdf" || created.Status != "available" {
+	if created.Filename != key+".pdf" || created.Status != "available" {
 		t.Fatalf("created = %+v", created)
+	}
+	if filepath.Base(created.StoragePath) != created.Filename {
+		t.Fatalf("stored name %q != filename %q", created.StoragePath, created.Filename)
 	}
 	if created.StoragePath == "" || !filepath.IsAbs(created.StoragePath) {
 		t.Fatalf("storage_path = %q", created.StoragePath)
@@ -176,19 +195,43 @@ type attachmentShape struct {
 func TestCreateDedupeReturnsExisting(t *testing.T) {
 	f := newAPI(t, nil, nil)
 
-	first := doMultipart(t, f.app, "/v1/attachments", "a.txt", "same-bytes", "")
+	firstKey := "11111111-2222-4333-8444-555555555555"
+	first := doMultipartWithKey(t, f.app, "/v1/attachments", "a.txt", "same-bytes", "", firstKey)
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first status = %d", first.StatusCode)
 	}
 	a := decode[attachmentShape](t, first)
 
-	second := doMultipart(t, f.app, "/v1/attachments", "b.txt", "same-bytes", "")
+	second := doMultipartWithKey(t, f.app, "/v1/attachments", "b.txt", "same-bytes", "", newIdemKey())
 	if second.StatusCode != http.StatusOK {
 		t.Fatalf("second status = %d, want 200 (deduped)", second.StatusCode)
 	}
 	b := decode[attachmentShape](t, second)
-	if b.ID != a.ID || b.Filename != "a.txt" {
+	if b.ID != a.ID || b.Filename != firstKey+".txt" {
 		t.Fatalf("dedupe returned %+v", b)
+	}
+}
+
+func TestFilenameIsKeyPlusOriginalExtension(t *testing.T) {
+	f := newAPI(t, nil, nil)
+	key := "99999999-8888-4777-8666-555555555555"
+	// A client filename far too long for Windows paths: only its extension
+	// may survive, and it is lowercased/bounded by storage.Ext.
+	longName := strings.Repeat("a-very-long-customer-filename-", 20) + ".PDF"
+
+	resp := doMultipartWithKey(t, f.app, "/v1/attachments", longName, "%PDF-1.4 content", "", key)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	created := decode[attachmentShape](t, resp)
+	if created.Filename != key+".pdf" {
+		t.Fatalf("filename = %q, want %q", created.Filename, key+".pdf")
+	}
+	if len(created.Filename) > 60 {
+		t.Fatalf("filename still too long: %q", created.Filename)
+	}
+	if filepath.Base(created.StoragePath) != created.Filename {
+		t.Fatalf("stored name = %q, want %q", created.StoragePath, created.Filename)
 	}
 }
 
@@ -242,8 +285,10 @@ func TestCreateFromS3Source(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
 	}
+	// JSON requests use doJSON's generated key; just check the extension came
+	// from the remote filename (the key is asserted in TestFilenameIsKey...).
 	created := decode[attachmentShape](t, resp)
-	if created.Filename != "file.txt" {
+	if !strings.HasSuffix(created.Filename, ".txt") || strings.Contains(created.Filename, "file") {
 		t.Fatalf("created = %+v", created)
 	}
 }
@@ -329,6 +374,40 @@ func TestIdempotencyReplaysResponse(t *testing.T) {
 	b := decode[attachmentShape](t, second)
 	if b.ID != a.ID {
 		t.Fatalf("replay returned different attachment: %s vs %s", b.ID, a.ID)
+	}
+}
+
+func TestIdempotencyKeyRequired(t *testing.T) {
+	f := newAPI(t, nil, nil)
+	body, ct := multipartBody(t, "file", "a.txt", "key required")
+
+	send := func(key string) *http.Response {
+		req := httptest.NewRequest(http.MethodPost, "/v1/attachments", strings.NewReader(body))
+		req.Header.Set("Content-Type", ct)
+		if key != "" {
+			req.Header.Set("X-Idempotency-Key", key)
+		}
+		resp, err := f.app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+
+	for _, tc := range []struct {
+		name, key string
+		want      int
+	}{
+		{"missing", "", http.StatusBadRequest},
+		{"too short", "short-key", http.StatusBadRequest},
+		{"valid uuid", "11111111-2222-4333-8444-555555555555", http.StatusCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := send(tc.key).StatusCode; got != tc.want {
+				t.Fatalf("status = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 
