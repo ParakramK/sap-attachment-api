@@ -86,4 +86,5 @@ jobs:
           if [ "${{ github.ref_type }}" != "tag" ]; then
             extra+=(--target "${{ github.sha }}")
           fi
-          gh release create "$VERSION" dist/* --generate-notes "${extra[@]}"
+          # dist/* skips dotfiles, so name .env.example explicitly.
+          gh release create "$VERSION" dist/* dist/.env.example --generate-notes "${extra[@]}"
