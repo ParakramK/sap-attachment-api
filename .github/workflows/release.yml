@@ -86,5 +86,6 @@ jobs:
           if [ "${{ github.ref_type }}" != "tag" ]; then
             extra+=(--target "${{ github.sha }}")
           fi
-          # dist/* skips dotfiles, so name .env.example explicitly.
-          gh release create "$VERSION" dist/* dist/.env.example --generate-notes "${extra[@]}"
+          # dist/* skips dotfiles; GitHub also rejects asset names starting
+          # with a dot, so give the example config an explicit label.
+          gh release create "$VERSION" dist/* 'dist/.env.example#env.example' --generate-notes "${extra[@]}"
