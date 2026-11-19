@@ -1,12 +1,15 @@
 name: Release
 
+# Release waits for the CI workflow run to finish before doing anything;
+# CI itself runs once (on the tag push), not a second time inside this file.
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag, e.g. v1.2.0'
+        description: 'Release tag, e.g. v0.4'
         required: true
         type: string
 
@@ -14,12 +17,42 @@ permissions:
   contents: write
 
 jobs:
-  # Release artifacts are only built after the full build-test gate passes.
-  verify:
-    uses: ./.github/workflows/ci.yml
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      sha: ${{ steps.meta.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Check CI result and resolve tag
+        id: meta
+        env:
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            version="$DISPATCH_VERSION"
+          else
+            if [ "$CONCLUSION" != success ]; then
+              echo "CI run did not pass (conclusion: $CONCLUSION)" >&2
+              exit 1
+            fi
+            version=$(git tag --points-at HEAD | grep '^v' | head -1 || true)
+          fi
+          if [ -z "$version" ]; then
+            echo "No v* tag on this commit — nothing to release."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: verify
+    needs: prepare
+    if: needs.prepare.outputs.version != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -32,6 +65,8 @@ jobs:
           - { goos: darwin, goarch: arm64 }
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - uses: actions/setup-go@v6
         with:
@@ -43,7 +78,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
-          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           name="sap-attachment-api-${VERSION}-${GOOS}-${GOARCH}"
@@ -58,11 +93,13 @@ jobs:
           path: dist/*
 
   release:
-    needs: build
+    needs: [prepare, build]
+    if: needs.prepare.outputs.version != ''
     runs-on: ubuntu-latest
     steps:
-      # Only .env.example is needed from the repo; config values stay on hosts.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -72,19 +109,18 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          # Manual dispatch sometimes passes the placeholder text as the value.
           case "$VERSION" in
             v[0-9]*.*) ;;
-            *) echo "Invalid VERSION '$VERSION' — pass a tag like v0.1" >&2; exit 1 ;;
+            *) echo "Invalid VERSION '$VERSION' — pass a tag like v0.4" >&2; exit 1 ;;
           esac
           # A leading dot is rejected in release asset names, so ship it as
           # env.example; dist/* picks it up normally.
           cp .env.example dist/env.example
           extra=()
-          if [ "${{ github.ref_type }}" != "tag" ]; then
-            extra+=(--target "${{ github.sha }}")
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            extra+=(--target "${{ needs.prepare.outputs.sha }}")
           fi
           gh release create "$VERSION" dist/* --generate-notes "${extra[@]}"
