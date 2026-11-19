@@ -2,5 +2,6 @@ bin/
 data/
 .env
 .env.*
+!.env.example
 *.local
 coverage.out

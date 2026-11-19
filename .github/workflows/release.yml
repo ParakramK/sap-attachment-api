@@ -75,6 +75,12 @@ jobs:
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
         run: |
           set -euo pipefail
+          # Manual dispatch sometimes passes the placeholder text as the value.
+          case "$VERSION" in
+            v[0-9]*.*) ;;
+            *) echo "Invalid VERSION '$VERSION' — pass a tag like v0.1" >&2; exit 1 ;;
+          esac
+          test -f .env.example || { echo ".env.example missing from checkout" >&2; exit 1; }
           cp .env.example dist/.env.example
           extra=()
           if [ "${{ github.ref_type }}" != "tag" ]; then
