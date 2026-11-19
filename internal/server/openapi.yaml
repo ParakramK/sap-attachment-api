@@ -176,7 +176,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     UnsupportedMediaType:
-      description: Expected multipart/form-data or application/json
+      description: Wrong request content type, or content is not a PDF or image
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }

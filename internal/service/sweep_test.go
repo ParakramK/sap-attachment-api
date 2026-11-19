@@ -36,11 +36,11 @@ func TestSweeperResolvesStagedRowsViaBackend(t *testing.T) {
 	ctx := context.Background()
 
 	// Two interrupted uploads: one whose object reached storage, one lost.
-	reached, _, err := f.uploader.Upload(ctx, Input{Reader: strings.NewReader("reached content"), Filename: "a.txt"})
+	reached, _, err := f.uploader.Upload(ctx, Input{Reader: strings.NewReader("%PDF-1.4 reached content"), Filename: "a.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	lost, _, err := f.uploader.Upload(ctx, Input{Reader: strings.NewReader("lost content"), Filename: "b.txt"})
+	lost, _, err := f.uploader.Upload(ctx, Input{Reader: strings.NewReader("%PDF-1.4 lost content"), Filename: "b.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}

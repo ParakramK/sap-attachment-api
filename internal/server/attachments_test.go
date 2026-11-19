@@ -196,13 +196,13 @@ func TestCreateDedupeReturnsExisting(t *testing.T) {
 	f := newAPI(t, nil, nil)
 
 	firstKey := "11111111-2222-4333-8444-555555555555"
-	first := doMultipartWithKey(t, f.app, "/v1/attachments", "a.txt", "same-bytes", "", firstKey)
+	first := doMultipartWithKey(t, f.app, "/v1/attachments", "a.txt", "%PDF-1.4 same-bytes", "", firstKey)
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first status = %d", first.StatusCode)
 	}
 	a := decode[attachmentShape](t, first)
 
-	second := doMultipartWithKey(t, f.app, "/v1/attachments", "b.txt", "same-bytes", "", newIdemKey())
+	second := doMultipartWithKey(t, f.app, "/v1/attachments", "b.txt", "%PDF-1.4 same-bytes", "", newIdemKey())
 	if second.StatusCode != http.StatusOK {
 		t.Fatalf("second status = %d, want 200 (deduped)", second.StatusCode)
 	}
@@ -238,7 +238,7 @@ func TestFilenameIsKeyPlusOriginalExtension(t *testing.T) {
 func TestCreateFromHTTPSource(t *testing.T) {
 	f := newAPI(t, nil, nil)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("downloaded content"))
+		_, _ = w.Write([]byte("%PDF-1.4 downloaded content"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -248,14 +248,14 @@ func TestCreateFromHTTPSource(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	created := decode[attachmentShape](t, resp)
-	if created.Filename == "" || created.SizeBytes != int64(len("downloaded content")) {
+	if created.Filename == "" || created.SizeBytes != int64(len("%PDF-1.4 downloaded content")) {
 		t.Fatalf("created = %+v", created)
 	}
 }
 
 func TestCreateFromS3Source(t *testing.T) {
 	var mu sync.Mutex
-	objects := map[string]string{"docs/file.txt": "s3 body"}
+	objects := map[string]string{"docs/file.txt": "%PDF-1.4 s3 body"}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -329,17 +329,17 @@ func TestCreateOversizedUpload(t *testing.T) {
 func TestAuthRequired(t *testing.T) {
 	f := newAPI(t, []string{"secret-key-1"}, nil)
 
-	resp := doMultipart(t, f.app, "/v1/attachments", "a.txt", "x", "")
+	resp := doMultipart(t, f.app, "/v1/attachments", "a.txt", "%PDF-1.4 x", "")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
 	}
 
-	resp = doMultipart(t, f.app, "/v1/attachments", "a.txt", "x", "wrong-key")
+	resp = doMultipart(t, f.app, "/v1/attachments", "a.txt", "%PDF-1.4 x", "wrong-key")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
 	}
 
-	resp = doMultipart(t, f.app, "/v1/attachments", "a.txt", "x", "secret-key-1")
+	resp = doMultipart(t, f.app, "/v1/attachments", "a.txt", "%PDF-1.4 x", "secret-key-1")
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
@@ -348,7 +348,7 @@ func TestAuthRequired(t *testing.T) {
 func TestIdempotencyReplaysResponse(t *testing.T) {
 	f := newAPI(t, nil, nil)
 
-	body, ct := multipartBody(t, "file", "same.txt", "idempotent content")
+	body, ct := multipartBody(t, "file", "same.txt", "%PDF-1.4 idempotent content")
 	send := func() *http.Response {
 		req := httptest.NewRequest(http.MethodPost, "/v1/attachments", strings.NewReader(body))
 		req.Header.Set("Content-Type", ct)
@@ -377,9 +377,17 @@ func TestIdempotencyReplaysResponse(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsTextFile(t *testing.T) {
+	f := newAPI(t, nil, nil)
+	resp := doMultipart(t, f.app, "/v1/attachments", "notes.txt", "just plain text", "")
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", resp.StatusCode)
+	}
+}
+
 func TestIdempotencyKeyRequired(t *testing.T) {
 	f := newAPI(t, nil, nil)
-	body, ct := multipartBody(t, "file", "a.txt", "key required")
+	body, ct := multipartBody(t, "file", "a.txt", "%PDF-1.4 key required")
 
 	send := func(key string) *http.Response {
 		req := httptest.NewRequest(http.MethodPost, "/v1/attachments", strings.NewReader(body))

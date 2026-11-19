@@ -134,7 +134,7 @@ func TestUploadSniffsRealContentType(t *testing.T) {
 func TestUploadDedupeReturnsExisting(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	content := []byte("identical content")
+	content := []byte("%PDF-1.4\nidentical content")
 
 	first, deduped, err := f.uploader.Upload(ctx, Input{Reader: bytes.NewReader(content), Filename: "first.txt"})
 	if err != nil || deduped {
@@ -163,14 +163,21 @@ func TestUploadOversized(t *testing.T) {
 	}
 }
 
-func TestUploadEmptyFile(t *testing.T) {
+func TestUploadRejectsEmptyAndNonImageFiles(t *testing.T) {
 	f := newFixture(t)
-	att, _, err := f.uploader.Upload(context.Background(), Input{Reader: strings.NewReader(""), Filename: "empty.txt"})
-	if err != nil {
-		t.Fatalf("empty upload: %v", err)
-	}
-	if att.SizeBytes != 0 {
-		t.Fatalf("size = %d, want 0", att.SizeBytes)
+	for _, tc := range []struct{ name, content string }{
+		{"empty", ""},
+		{"text", "just plain text"},
+		{"html", "<html><body>not an attachment</body></html>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := f.uploader.Upload(context.Background(), Input{
+				Reader: strings.NewReader(tc.content), Filename: "file.txt",
+			})
+			if !errors.Is(err, ErrUnsupportedType) {
+				t.Fatalf("err = %v, want ErrUnsupportedType", err)
+			}
+		})
 	}
 }
 

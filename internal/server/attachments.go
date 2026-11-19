@@ -167,10 +167,14 @@ func fetchError(err error) error {
 
 // uploadError maps uploader errors onto API errors.
 func uploadError(err error) error {
-	if errors.Is(err, storage.ErrTooLarge) {
+	switch {
+	case errors.Is(err, storage.ErrTooLarge):
 		return fiber.NewError(http.StatusRequestEntityTooLarge, "upload exceeds maximum size")
+	case errors.Is(err, service.ErrUnsupportedType):
+		return fiber.NewError(http.StatusUnsupportedMediaType, "only PDF and image files are accepted")
+	default:
+		return fiber.NewError(http.StatusInternalServerError, "upload failed")
 	}
-	return fiber.NewError(http.StatusInternalServerError, "upload failed")
 }
 
 func getAttachment(d Deps) fiber.Handler {

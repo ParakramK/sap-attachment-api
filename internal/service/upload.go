@@ -17,6 +17,15 @@ import (
 	"github.com/parakram/sap-attachment-api/internal/storage"
 )
 
+// ErrUnsupportedType signals content that is neither PDF nor an image.
+var ErrUnsupportedType = errors.New("only PDF and image files are accepted")
+
+// allowedType accepts server-sniffed PDFs and images. Client-supplied content
+// types and file names are never consulted.
+func allowedType(contentType string) bool {
+	return contentType == "application/pdf" || strings.HasPrefix(contentType, "image/")
+}
+
 // Uploader ingests content from any source (direct upload body, HTTP URL,
 // S3 URI): it sniffs the content type, stages to disk with a SHA-256 digest,
 // dedupes by content, commits atomically and maintains the DB lifecycle.
@@ -65,6 +74,11 @@ func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, de
 	staged, err := storage.Stage(u.stagingDir, br, u.maxBytes)
 	if err != nil {
 		return nil, false, err
+	}
+	// Checked after staging so the size cap wins for oversized files.
+	if !allowedType(contentType) {
+		_ = staged.Discard()
+		return nil, false, ErrUnsupportedType
 	}
 	discard := func() {
 		_ = staged.Discard()

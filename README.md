@@ -35,6 +35,9 @@ auth in dev). Errors use one envelope: `{"code", "message", "request_id"}`.
 
 ### Upload a file directly
 
+Only **PDF and image** content is accepted. The type is sniffed from the
+file bytes server-side; other formats are rejected with `415`.
+
 ```sh
 curl -X POST http://localhost:8080/v1/attachments \
   -H "X-API-Key: local-dev-key" -H "X-Idempotency-Key: $(uuidgen)" \
