@@ -70,25 +70,52 @@ paths:
           multipart/form-data:
             schema:
               type: object
+              required: [file]
               properties:
                 file:
                   type: string
                   format: binary
-                  description: The attachment content.
+                  description: The attachment content (PDF or image only).
           application/json:
+            description: |
+              Exactly one of source_url or source_uri is required. Send both
+              or neither -> 400. The service downloads the source itself.
             schema:
-              type: object
-              properties:
-                source_url:
-                  type: string
-                  format: uri
-                  description: http(s) URL to download. Private/reserved network targets are denied unless FETCH_ALLOW_PRIVATE_NET is set.
-                source_uri:
-                  type: string
-                  description: S3 object URI (s3://bucket/key). Bucket must pass the optional S3_ALLOWED_BUCKETS allowlist.
-                filename:
-                  type: string
-                  description: Optional file name override; otherwise derived from the source.
+              allOf:
+                - oneOf:
+                    - type: object
+                      title: HTTP source
+                      required: [source_url]
+                      properties:
+                        source_url:
+                          type: string
+                          format: uri
+                          description: http(s) URL to download. Private/reserved network targets are denied unless FETCH_ALLOW_PRIVATE_NET is set.
+                    - type: object
+                      title: S3 source
+                      required: [source_uri]
+                      properties:
+                        source_uri:
+                          type: string
+                          pattern: '^s3://[^/]+/.+'
+                          description: S3 object URI (s3://bucket/key). Bucket must pass the optional S3_ALLOWED_BUCKETS allowlist.
+                - type: object
+                  properties:
+                    filename:
+                      type: string
+                      description: |
+                        Optional. Only its extension is kept (e.g. .pdf);
+                        the original name is never stored. The stored file is
+                        named <X-Idempotency-Key><extension>.
+            examples:
+              http:
+                summary: Download from an HTTP URL
+                value:
+                  source_url: https://example.com/report.pdf
+              s3:
+                summary: Download an S3 object
+                value:
+                  source_uri: s3://my-bucket/invoices/2026-01.pdf
       responses:
         "201":
           description: Attachment stored
