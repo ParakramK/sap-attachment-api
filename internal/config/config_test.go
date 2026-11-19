@@ -120,6 +120,11 @@ func TestValidateSMBBackendRules(t *testing.T) {
 		if err := c.Validate(); err == nil {
 			t.Errorf("expected error for staging dir %q", bad)
 		}
+		c = smbConfig()
+		c.SMBBaseDir = bad
+		if err := c.Validate(); err == nil {
+			t.Errorf("expected error for base dir %q", bad)
+		}
 	}
 
 	c = smbConfig()

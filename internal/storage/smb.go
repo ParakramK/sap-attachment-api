@@ -30,6 +30,7 @@ type SMB struct {
 	password string
 	domain   string
 	signing  bool
+	base     string // share-relative folder holding all objects (may be empty)
 	staging  string // share-relative staging dir, slash-separated
 
 	mu      sync.Mutex
@@ -45,6 +46,11 @@ func NewSMB(cfg *config.Config) (*SMB, error) {
 	if host == "" {
 		return nil, errors.New("SMB_SERVER must not be empty")
 	}
+	base := strings.TrimSuffix(strings.ReplaceAll(cfg.SMBBaseDir, `\`, "/"), "/")
+	staging := strings.TrimSuffix(strings.ReplaceAll(cfg.SMBStagingDir, `\`, "/"), "/")
+	if base != "" {
+		staging = base + "/" + staging // keep all service data under the base folder
+	}
 	return &SMB{
 		host:     host,
 		port:     port,
@@ -53,7 +59,8 @@ func NewSMB(cfg *config.Config) (*SMB, error) {
 		password: cfg.SMBPassword,
 		domain:   cfg.SMBDomain,
 		signing:  cfg.SMBRequireSigning,
-		staging:  strings.TrimSuffix(strings.ReplaceAll(cfg.SMBStagingDir, `\`, "/"), "/"),
+		base:     base,
+		staging:  staging,
 	}, nil
 }
 
@@ -126,7 +133,7 @@ func (s *SMB) withShare(ctx context.Context, op func(sh *smb2.Share) error) erro
 func (s *SMB) Save(ctx context.Context, staged *StagedFile, filename, _ string) (string, error) {
 	defer func() { _ = staged.Discard() }()
 
-	rel := ObjectPath(staged.SHA256, filename)
+	rel := path.Join(s.base, ObjectPath(staged.SHA256, filename))
 	tmp := s.staging + "/" + staged.SHA256 + "-" + randToken() + ".tmp"
 
 	err := s.withShare(ctx, func(sh *smb2.Share) error {

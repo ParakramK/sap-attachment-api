@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"os"
+	"path"
 	"strings"
 	"testing"
 
@@ -37,6 +38,26 @@ func TestSMBReferenceIsUNCWithoutPort(t *testing.T) {
 		if got != want {
 			t.Errorf("Reference after %q = %q, want %q", tc.server, got, want)
 		}
+	}
+}
+
+func TestSMBBaseDirNestsObjectsAndStaging(t *testing.T) {
+	cfg := smbConfig("192.168.1.10")
+	cfg.SMBShare = "nas" // \\IP\nas\attachments
+	cfg.SMBBaseDir = "attachments"
+	s, err := NewSMB(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.base != "attachments" || s.staging != "attachments/staging" {
+		t.Fatalf("base=%q staging=%q", s.base, s.staging)
+	}
+	// Save prefixes the relative object path with the base folder, so the
+	// reference becomes \\IP\nas\attachments\ab\abc.pdf.
+	got := s.Reference(path.Join(s.base, "ab/abcdef.pdf"))
+	want := `\\192.168.1.10\nas\attachments\ab\abcdef.pdf`
+	if got != want {
+		t.Fatalf("reference = %q, want %q", got, want)
 	}
 }
 

@@ -40,6 +40,9 @@ type Config struct {
 	SMBDomain   string `env:"SMB_DOMAIN"`   // optional AD domain
 	// Require SMB3 message signing (integrity); disable only for legacy NAS.
 	SMBRequireSigning bool `env:"SMB_REQUIRE_SIGNING" env-default:"true"`
+	// Optional subfolder inside the share where all objects live, e.g.
+	// "attachments" for \\server\nas\attachments. Empty = share root.
+	SMBBaseDir string `env:"SMB_BASE_DIR"`
 	// Where commits are staged inside the share before the atomic rename.
 	SMBStagingDir string `env:"SMB_STAGING_DIR" env-default:"staging"`
 
@@ -107,6 +110,10 @@ func (c Config) Validate() error {
 		if strings.HasPrefix(c.SMBStagingDir, "/") || strings.Contains(c.SMBStagingDir, `\`) ||
 			strings.Contains(c.SMBStagingDir, "..") {
 			return errors.New("SMB_STAGING_DIR must be a share-relative path without .. or backslashes")
+		}
+		if c.SMBBaseDir != "" && (strings.HasPrefix(c.SMBBaseDir, "/") ||
+			strings.Contains(c.SMBBaseDir, `\`) || strings.Contains(c.SMBBaseDir, "..")) {
+			return errors.New("SMB_BASE_DIR must be a share-relative path without .. or backslashes")
 		}
 	default:
 		return fmt.Errorf("STORAGE_BACKEND must be local or smb, got %q", c.StorageBackend)

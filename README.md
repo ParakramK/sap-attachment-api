@@ -79,7 +79,8 @@ must itself have access to the same share.
 ```sh
 STORAGE_BACKEND=smb
 SMB_SERVER=192.168.1.10        # or host:port
-SMB_SHARE=attachment
+SMB_SHARE=nas
+SMB_BASE_DIR=attachments   # writes to \\192.168.1.10\nas\attachments
 SMB_USERNAME=sap-attachments
 SMB_PASSWORD=...               # secret
 SMB_DOMAIN=CORP                # optional
@@ -99,7 +100,8 @@ SMB_DOMAIN=CORP                # optional
 | `DB_PATH`              | `./data/attachments.db`  | SQLite database path                           |
 | `STORAGE_BACKEND`      | `local`                  | `local` or `smb` (service speaks SMB directly)  |
 | `SMB_SERVER`           | –                        | SMB host or host:port (when backend is smb)    |
-| `SMB_SHARE`            | –                        | Share name                                     |
+| `SMB_SHARE`            | –                        | Share name (e.g. `nas` for `\\IP\nas\attachments`) |
+| `SMB_BASE_DIR`         | –                        | Optional folder inside the share (e.g. `attachments`); empty = share root |
 | `SMB_USERNAME`         | –                        | Service-account user (NTLMv2)                  |
 | `SMB_PASSWORD`         | –                        | Service-account password (secret)              |
 | `SMB_DOMAIN`           | –                        | Optional AD domain                             |
