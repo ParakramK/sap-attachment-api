@@ -225,6 +225,32 @@ func TestLoadFromExplicitPath(t *testing.T) {
 	}
 }
 
+func TestPortOverridesAddrPort(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(t.TempDir()); err != nil { // no .env in this directory
+		t.Fatal(err)
+	}
+
+	t.Setenv("ADDR", "127.0.0.1:8080")
+	t.Setenv("PORT", "9090")
+	c, err := LoadFrom("")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.Addr != "127.0.0.1:9090" {
+		t.Fatalf("addr = %q, want 127.0.0.1:9090", c.Addr)
+	}
+
+	t.Setenv("PORT", "bad")
+	if _, err := LoadFrom(""); err == nil {
+		t.Fatal("expected error for invalid PORT")
+	}
+}
+
 func TestValidateDBPathMustBeLocal(t *testing.T) {
 	for _, bad := range []string{`\\nas\share\attachments.db`, "//nas/share/attachments.db"} {
 		c := validConfig()

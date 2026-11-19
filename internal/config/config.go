@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,8 @@ import (
 type Config struct {
 	Env  string `env:"APP_ENV" env-default:"dev"` // dev | prod
 	Addr string `env:"ADDR" env-default:":8080"`
+	// PORT overrides the port part of ADDR (e.g. PORT=9090 -> :9090).
+	Port string `env:"PORT"`
 
 	LogLevel     string `env:"LOG_LEVEL" env-default:"info"`
 	LogtailToken string `env:"LOGTAIL_TOKEN"` // Better Stack source token (secret)
@@ -97,6 +101,17 @@ func LoadFrom(path string) (*Config, error) {
 	var c Config
 	if err := cleanenv.ReadEnv(&c); err != nil {
 		return nil, fmt.Errorf("read environment: %w", err)
+	}
+	if p := strings.TrimSpace(c.Port); p != "" {
+		port, err := strconv.Atoi(p)
+		if err != nil || port < 1 || port > 65535 {
+			return nil, fmt.Errorf("PORT must be a number between 1 and 65535, got %q", p)
+		}
+		host, _, err := net.SplitHostPort(c.Addr)
+		if err != nil {
+			host = ""
+		}
+		c.Addr = net.JoinHostPort(host, p)
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)

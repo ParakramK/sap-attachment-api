@@ -20,7 +20,8 @@ never baked in**. At startup the service reads `./.env`, or an explicit file:
 # Windows: sap-attachment-api.exe --config C:\sap\.env
 ```
 
-Real environment variables override the file. Health: `/healthz`, readiness:
+Real environment variables override the file. Set `PORT=9090` (or
+`ADDR=:9090`) in it to change the listen port. Health: `/healthz`, readiness:
 `/readyz`, docs: `/docs`, contract: `/openapi.yaml`. All variables are listed
 in `.env.example`.
 
