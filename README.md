@@ -103,6 +103,7 @@ SMB_DOMAIN=CORP                # optional
 | `LOG_LEVEL`            | `info`                   | slog level for stdout                          |
 | `LOGTAIL_TOKEN`        | –                        | Better Stack source token (secret)             |
 | `LOGTAIL_LEVEL`        | `info`                   | Minimum level shipped to Better Stack          |
+| `SQL_DEBUG`            | `false`                  | Verbose SQL logging (very noisy; debug only)   |
 | `STORAGE_DIR`          | `./data/storage`         | Attachment storage directory                   |
 | `STAGING_DIR`          | `./data/staging`         | Upload staging directory (always local scratch) |
 | `DB_PATH`              | `./data/attachments.db`  | SQLite database path — **always local**, also with the SMB backend |

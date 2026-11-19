@@ -44,7 +44,7 @@ func Open(cfg *config.Config) (*bun.DB, error) {
 	sqldb.SetMaxIdleConns(10)
 
 	d := bun.NewDB(sqldb, sqlitedialect.New())
-	if cfg.Env == "dev" {
+	if cfg.SQLDebug {
 		d = d.WithQueryHook(bundebug.NewQueryHook(bundebug.WithVerbose(true)))
 	}
 	if err := d.PingContext(context.Background()); err != nil {
