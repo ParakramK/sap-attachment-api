@@ -33,6 +33,12 @@ type attachmentResponse struct {
 }
 
 func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
+	// Prefer the persisted full path; older rows (before the column existed)
+	// fall back to deriving it from object_path.
+	ref := a.StoragePath
+	if ref == "" {
+		ref = store.Reference(a.ObjectPath)
+	}
 	return attachmentResponse{
 		ID:          a.ID,
 		Filename:    a.Filename,
@@ -40,7 +46,7 @@ func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
 		SizeBytes:   a.SizeBytes,
 		SHA256:      a.SHA256,
 		Status:      a.Status,
-		StoragePath: store.Reference(a.ObjectPath),
+		StoragePath: ref,
 		CreatedAt:   a.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   a.UpdatedAt.Format(time.RFC3339),
 	}

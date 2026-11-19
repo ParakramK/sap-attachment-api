@@ -30,6 +30,7 @@ func sample(t *testing.T, sha, status string) *Attachment {
 	a.Status = status
 	a.Backend = "local"
 	a.ObjectPath = sha[:2] + "/" + sha + ".pdf"
+	a.StoragePath = "/data/storage/" + a.ObjectPath
 	a.CreatedAt = now
 	a.UpdatedAt = now
 	return a
@@ -49,6 +50,9 @@ func TestCreateAndRead(t *testing.T) {
 	}
 	if got.Filename != "report.pdf" || got.SizeBytes != 1234 {
 		t.Fatalf("unexpected row: %+v", got)
+	}
+	if got.StoragePath != a.StoragePath {
+		t.Fatalf("storage_path round-trip failed: %q != %q", got.StoragePath, a.StoragePath)
 	}
 	if !got.CreatedAt.Equal(a.CreatedAt) {
 		t.Fatalf("time round-trip failed: %v != %v", got.CreatedAt, a.CreatedAt)

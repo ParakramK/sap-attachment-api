@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"os"
-	"path"
 	"strings"
 	"testing"
 
@@ -52,10 +51,13 @@ func TestSMBBaseDirNestsObjectsAndStaging(t *testing.T) {
 	if s.base != "attachments" || s.staging != "attachments/staging" {
 		t.Fatalf("base=%q staging=%q", s.base, s.staging)
 	}
-	// Save prefixes the relative object path with the base folder, so the
-	// reference becomes \\IP\nas\attachments\ab\abc.pdf.
-	got := s.Reference(path.Join(s.base, "ab/abcdef.pdf"))
-	want := `\\192.168.1.10\nas\attachments\ab\abcdef.pdf`
+	// The DB stores a base-free object_path; the backend resolves the base
+	// for reads, deletes and UNC references.
+	if got := s.objectPath("abcdef.pdf"); got != "attachments/abcdef.pdf" {
+		t.Fatalf("objectPath = %q", got)
+	}
+	got := s.Reference("abcdef.pdf")
+	want := `\\192.168.1.10\nas\attachments\abcdef.pdf`
 	if got != want {
 		t.Fatalf("reference = %q, want %q", got, want)
 	}

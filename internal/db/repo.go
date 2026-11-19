@@ -29,8 +29,9 @@ type Attachment struct {
 	SizeBytes   int64     `bun:"size_bytes,notnull"`
 	SHA256      string    `bun:"sha256,notnull"`
 	Status      string    `bun:"status,notnull"`
-	Backend     string    `bun:"backend,notnull"` // storage backend holding the object
-	ObjectPath  string    `bun:"object_path,notnull"`
+	Backend     string    `bun:"backend,notnull"`      // storage backend holding the object
+	ObjectPath  string    `bun:"object_path,notnull"`  // backend-neutral, base-free
+	StoragePath string    `bun:"storage_path,notnull"` // full consumer-facing path (absolute/UNC)
 	CreatedAt   time.Time `bun:"created_at,notnull"`
 	UpdatedAt   time.Time `bun:"updated_at,notnull"`
 }

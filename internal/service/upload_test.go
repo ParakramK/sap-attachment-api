@@ -101,6 +101,9 @@ func TestUploadDirect(t *testing.T) {
 	if !filepath.IsAbs(abs) {
 		t.Fatalf("reference not absolute: %q", abs)
 	}
+	if att.StoragePath != abs {
+		t.Fatalf("storage_path = %q, want %q", att.StoragePath, abs)
+	}
 
 	// Staging dir is empty after commit.
 	entries, _ := filepath.Glob(filepath.Join(f.dir, "staging", "*"))

@@ -127,22 +127,28 @@ func (s *SMB) withShare(ctx context.Context, op func(sh *smb2.Share) error) erro
 	return op(sh.WithContext(ctx))
 }
 
+// objectPath resolves a backend-neutral, base-free object path (the value
+// stored in the DB) to its location inside the share's base folder.
+func (s *SMB) objectPath(rel string) string { return path.Join(s.base, rel) }
+
 // Save copies the staged file into the share's staging dir and renames it
 // into place (ReplaceIfExists), which is the atomic commit. A leftover
-// object from an earlier crash is simply overwritten.
+// object from an earlier crash is simply overwritten. The returned rel stays
+// base-free so it matches the DB's object_path.
 func (s *SMB) Save(ctx context.Context, staged *StagedFile, filename, _ string) (string, error) {
 	defer func() { _ = staged.Discard() }()
 
 	// The idempotency key (plus its bounded extension) is the whole file
-	// name; the optional SMB base folder is its only parent.
-	rel := path.Join(s.base, filename)
+	// name; the optional SMB base folder is applied by objectPath.
+	rel := filename
+	target := s.objectPath(rel)
 	tmp := s.staging + "/" + staged.SHA256 + "-" + randToken() + ".tmp"
 
 	err := s.withShare(ctx, func(sh *smb2.Share) error {
 		if err := sh.MkdirAll(s.staging, 0o750); err != nil {
 			return fmt.Errorf("smb create staging dir: %w", err)
 		}
-		if dir := path.Dir(rel); dir != "." {
+		if dir := path.Dir(target); dir != "." {
 			if err := sh.MkdirAll(dir, 0o750); err != nil {
 				return fmt.Errorf("smb create object dir: %w", err)
 			}
@@ -170,7 +176,7 @@ func (s *SMB) Save(ctx context.Context, staged *StagedFile, filename, _ string) 
 			return fmt.Errorf("smb close staged object: %w", err)
 		}
 
-		if err := sh.Rename(tmp, rel); err != nil {
+		if err := sh.Rename(tmp, target); err != nil {
 			return fmt.Errorf("smb commit object: %w", err)
 		}
 		return nil
@@ -184,7 +190,7 @@ func (s *SMB) Save(ctx context.Context, staged *StagedFile, filename, _ string) 
 func (s *SMB) Has(ctx context.Context, rel string) (bool, error) {
 	var has bool
 	err := s.withShare(ctx, func(sh *smb2.Share) error {
-		_, err := sh.Stat(rel)
+		_, err := sh.Stat(s.objectPath(rel))
 		switch {
 		case err == nil:
 			has = true
@@ -200,7 +206,7 @@ func (s *SMB) Has(ctx context.Context, rel string) (bool, error) {
 
 func (s *SMB) Delete(ctx context.Context, rel string) error {
 	return s.withShare(ctx, func(sh *smb2.Share) error {
-		if err := sh.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := sh.Remove(s.objectPath(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		return nil
@@ -209,7 +215,8 @@ func (s *SMB) Delete(ctx context.Context, rel string) error {
 
 // Reference is the Windows UNC path the SAP integration reads the file from.
 func (s *SMB) Reference(rel string) string {
-	return `\\` + s.host + `\` + s.share + `\` + strings.ReplaceAll(rel, "/", `\`)
+	full := s.objectPath(rel)
+	return `\\` + s.host + `\` + s.share + `\` + strings.ReplaceAll(full, "/", `\`)
 }
 
 func (s *SMB) Name() string { return "smb" }

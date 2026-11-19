@@ -96,6 +96,7 @@ func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, de
 	a.Status = db.StatusStaged
 	a.Backend = u.store.Name()
 	a.ObjectPath = a.Filename
+	a.StoragePath = u.store.Reference(a.ObjectPath)
 	a.CreatedAt = u.now()
 	a.UpdatedAt = a.CreatedAt
 
