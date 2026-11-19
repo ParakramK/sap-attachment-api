@@ -74,11 +74,24 @@ type Config struct {
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-default:"15s"`
 }
 
-func Load() (*Config, error) {
-	// .env is optional. godotenv.Load never overrides variables already in
-	// the real environment, so precedence is: OS env > .env > defaults.
-	// (In containers .env is excluded by .dockerignore; only OS env applies.)
-	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+// Load reads config from the process environment, an explicit dotenv file,
+// or ./.env (in that order of precedence). Nothing is baked into the binary:
+// every host supplies its own values at startup.
+func Load() (*Config, error) { return LoadFrom("") }
+
+// LoadFrom loads configuration, optionally from an explicit dotenv path.
+// A path from CONFIG_FILE is used when none is passed. Real environment
+// variables always win over values in a file.
+func LoadFrom(path string) (*Config, error) {
+	if path == "" {
+		path = os.Getenv("CONFIG_FILE")
+	}
+	if path != "" {
+		// Explicit path: a missing file is an error, not a silent fallback.
+		if err := godotenv.Load(path); err != nil {
+			return nil, fmt.Errorf("load config file %q: %w", path, err)
+		}
+	} else if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("load .env: %w", err)
 	}
 	var c Config

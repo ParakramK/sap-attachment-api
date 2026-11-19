@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -27,7 +28,10 @@ func main() {
 }
 
 func run() error {
-	cfg, err := config.Load()
+	configPath := flag.String("config", "", "path to a dotenv config file (default ./.env; CONFIG_FILE also accepted)")
+	flag.Parse()
+
+	cfg, err := config.LoadFrom(*configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

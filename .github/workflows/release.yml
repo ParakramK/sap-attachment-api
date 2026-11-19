@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag, e.g. v1.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # Release artifacts are only built after the full build-test gate passes.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true # module cache shared with CI
+
+      - name: Cross-compile binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+        run: |
+          set -euo pipefail
+          name="sap-attachment-api-${VERSION}-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = windows ]; then name="$name.exe"; fi
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o "dist/$name" ./cmd/server
+          (cd dist && sha256sum "$name" > "$name.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Only .env.example is needed from the repo; config values stay on hosts.
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+        run: |
+          set -euo pipefail
+          cp .env.example dist/.env.example
+          extra=()
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            extra+=(--target "${{ github.sha }}")
+          fi
+          gh release create "$VERSION" dist/* --generate-notes "${extra[@]}"

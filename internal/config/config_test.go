@@ -200,6 +200,31 @@ func TestLoadReadsDotEnvAndEnvWins(t *testing.T) {
 	}
 }
 
+func TestLoadFromExplicitPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "host.env")
+	content := "APP_ENV=dev\nAPI_KEYS=from-explicit-file\nMAX_UPLOAD_MB=9\n" +
+		"STORAGE_BACKEND=local\nDB_PATH=./data/attachments.db\n" +
+		"STORAGE_DIR=./data/storage\nSTAGING_DIR=./data/staging\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Keep the explicit path out of the way of other tests' cwd .env.
+	t.Setenv("CONFIG_FILE", path)
+	c, err := LoadFrom("")
+	if err != nil {
+		t.Fatalf("load explicit path: %v", err)
+	}
+	if c.MaxUploadMB != 9 || len(c.APIKeys) != 1 || c.APIKeys[0] != "from-explicit-file" {
+		t.Fatalf("explicit file not applied: max=%d keys=%v", c.MaxUploadMB, c.APIKeys)
+	}
+
+	if _, err := LoadFrom(filepath.Join(dir, "missing.env")); err == nil {
+		t.Fatal("expected error for a missing explicit config file")
+	}
+}
+
 func TestValidateDBPathMustBeLocal(t *testing.T) {
 	for _, bad := range []string{`\\nas\share\attachments.db`, "//nas/share/attachments.db"} {
 		c := validConfig()
