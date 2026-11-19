@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # `go install` puts binaries in GOPATH/bin; make check calls them by name.
+      - name: Add Go bin to PATH
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # Pinned to the versions used for local development so CI results match.
+      - name: Install check tools
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+
+      - name: Tool versions
+        run: |
+          go version
+          golangci-lint version
+          govulncheck -version
+
+      # make check = fmt + vet + lint + race tests + build + binary vuln scan.
+      # The live SMB test is env-guarded (SMB_TEST_ADDR) and skips in CI.
+      - name: Build, lint, race tests and vulnerability scan
+        run: make check
