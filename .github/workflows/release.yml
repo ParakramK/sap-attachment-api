@@ -80,12 +80,11 @@ jobs:
             v[0-9]*.*) ;;
             *) echo "Invalid VERSION '$VERSION' — pass a tag like v0.1" >&2; exit 1 ;;
           esac
-          test -f .env.example || { echo ".env.example missing from checkout" >&2; exit 1; }
-          cp .env.example dist/.env.example
+          # A leading dot is rejected in release asset names, so ship it as
+          # env.example; dist/* picks it up normally.
+          cp .env.example dist/env.example
           extra=()
           if [ "${{ github.ref_type }}" != "tag" ]; then
             extra+=(--target "${{ github.sha }}")
           fi
-          # dist/* skips dotfiles; GitHub also rejects asset names starting
-          # with a dot, so give the example config an explicit label.
-          gh release create "$VERSION" dist/* 'dist/.env.example#env.example' --generate-notes "${extra[@]}"
+          gh release create "$VERSION" dist/* --generate-notes "${extra[@]}"
