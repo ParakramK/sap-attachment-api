@@ -175,9 +175,9 @@ func (c *Client) CreateAttachment(ctx context.Context, storagePath string) (int6
 
 func (c *Client) login(ctx context.Context) error {
 	credentials, err := json.Marshal(map[string]string{
-		"CompanyDatabase": c.database,
-		"UserName":        c.username,
-		"Password":        c.password,
+		"CompanyDB": c.database,
+		"UserName":  c.username,
+		"Password":  c.password,
 	})
 	if err != nil {
 		return fmt.Errorf("sap encode login: %w", err)

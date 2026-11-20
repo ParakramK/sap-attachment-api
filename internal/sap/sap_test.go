@@ -65,7 +65,7 @@ func TestCreateAttachment(t *testing.T) {
 		t.Fatalf("AbsoluteEntry = %d, want 148076", entry)
 	}
 
-	if loginBody["CompanyDatabase"] != "SBODEMO" || loginBody["UserName"] != "manager" || loginBody["Password"] != "secret" {
+	if loginBody["CompanyDB"] != "SBODEMO" || loginBody["UserName"] != "manager" || loginBody["Password"] != "secret" {
 		t.Fatalf("login body = %+v", loginBody)
 	}
 	if gotCookie != "session-123" {
