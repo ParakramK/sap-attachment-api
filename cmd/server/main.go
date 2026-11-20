@@ -77,6 +77,13 @@ func run() error {
 	var sapDep server.SAPClient // stay untyped-nil when SAP is disabled
 	if sapClient != nil {
 		sapDep = sapClient
+		// Log in synchronously so the boot log shows whether SAP is reachable.
+		// A failure is not fatal: the warm loop and the next upload retry.
+		if err := sapClient.Login(ctx); err != nil {
+			log.Warn("SAP login failed at startup; will retry", "err", err)
+		} else {
+			log.Info("SAP session established")
+		}
 		go sapClient.Start(ctx) // keeps the SAP session warm (25 min refresh)
 	}
 

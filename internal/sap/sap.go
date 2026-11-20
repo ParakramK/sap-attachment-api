@@ -74,6 +74,14 @@ type attachmentRequest struct {
 	Lines []attachmentLine `json:"Attachments2_Lines"`
 }
 
+// Login authenticates immediately (used at startup). Safe to call more than
+// once: an active session is reused.
+func (c *Client) Login(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	return c.ensureSession(ctx)
+}
+
 // Start logs in immediately and refreshes the session every 25 minutes, so
 // it stays warm even when no uploads arrive. It returns when ctx is canceled.
 // A failed refresh is ignored here: the next upload retries the login.

@@ -105,6 +105,29 @@ func TestCreateAttachmentLoginFailure(t *testing.T) {
 	}
 }
 
+func TestLoginAtStartupIsReused(t *testing.T) {
+	var logins atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logins.Add(1)
+		http.SetCookie(w, &http.Cookie{Name: "SESSIONID", Value: "s", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := New(testConfig(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := client.Login(context.Background()); err != nil {
+			t.Fatalf("login: %v", err)
+		}
+	}
+	if got := logins.Load(); got != 1 {
+		t.Fatalf("logins = %d, want 1", got)
+	}
+}
+
 func TestSessionReuseAndWarmRefresh(t *testing.T) {
 	old := refreshInterval
 	refreshInterval = 100 * time.Millisecond
