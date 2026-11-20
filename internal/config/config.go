@@ -122,6 +122,11 @@ func LoadFrom(path string) (*Config, error) {
 		}
 		c.Addr = net.JoinHostPort(host, p)
 	}
+	// dotenv keeps inline "# ..." text as the value when a line is written
+	// as "KEY= # comment". Treat that like an unset optional value.
+	if strings.HasPrefix(strings.TrimSpace(c.SMBBaseDir), "#") {
+		c.SMBBaseDir = ""
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -161,12 +166,13 @@ func (c Config) Validate() error {
 			return errors.New("SMB_STAGING_DIR must not be empty")
 		}
 		if strings.HasPrefix(c.SMBStagingDir, "/") || strings.Contains(c.SMBStagingDir, `\`) ||
-			strings.Contains(c.SMBStagingDir, "..") {
-			return errors.New("SMB_STAGING_DIR must be a share-relative path without .. or backslashes")
+			strings.Contains(c.SMBStagingDir, "..") || strings.ContainsAny(c.SMBStagingDir, " \t#") {
+			return errors.New("SMB_STAGING_DIR must be a share-relative path without .., backslashes, spaces or #")
 		}
 		if c.SMBBaseDir != "" && (strings.HasPrefix(c.SMBBaseDir, "/") ||
-			strings.Contains(c.SMBBaseDir, `\`) || strings.Contains(c.SMBBaseDir, "..")) {
-			return errors.New("SMB_BASE_DIR must be a share-relative path without .. or backslashes")
+			strings.Contains(c.SMBBaseDir, `\`) || strings.Contains(c.SMBBaseDir, "..") ||
+			strings.ContainsAny(c.SMBBaseDir, " \t#")) {
+			return errors.New("SMB_BASE_DIR must be a share-relative path without .., backslashes, spaces or #")
 		}
 	default:
 		return fmt.Errorf("STORAGE_BACKEND must be local or smb, got %q", c.StorageBackend)

@@ -74,7 +74,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init SAP client: %w", err)
 	}
-	go sapClient.Start(ctx) // nil-safe; keeps the SAP session warm (25 min refresh)
+	var sapDep server.SAPClient // stay untyped-nil when SAP is disabled
+	if sapClient != nil {
+		sapDep = sapClient
+		go sapClient.Start(ctx) // keeps the SAP session warm (25 min refresh)
+	}
 
 	// Startup reconciliation: clean orphan staging files, resolve rows stuck
 	// in staged. Failures are logged but not fatal — the service still runs.
@@ -105,7 +109,7 @@ func run() error {
 		Store:    backend,
 		Uploader: uploader,
 		Fetcher:  fetcher,
-		SAP:      sapClient,
+		SAP:      sapDep,
 	})
 
 	errCh := make(chan error, 1)

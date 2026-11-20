@@ -275,6 +275,26 @@ func TestPortOverridesAddrPort(t *testing.T) {
 	}
 }
 
+func TestLoadCommentedSMBBaseDirIsOptional(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	content := "APP_ENV=dev\nSTORAGE_BACKEND=smb\nSMB_SERVER=10.0.0.1\n" +
+		"SMB_SHARE=nas\nSMB_USERNAME=u\nSMB_PASSWORD=p\n" +
+		"SMB_BASE_DIR= # subfolder inside the share, e.g. attachments\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_FILE", path)
+
+	c, err := LoadFrom("")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.SMBBaseDir != "" {
+		t.Fatalf("SMB_BASE_DIR = %q, want empty (comment value ignored)", c.SMBBaseDir)
+	}
+}
+
 func TestValidateDBPathMustBeLocal(t *testing.T) {
 	for _, bad := range []string{`\\nas\share\attachments.db`, "//nas/share/attachments.db"} {
 		c := validConfig()

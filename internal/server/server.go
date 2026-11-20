@@ -6,8 +6,10 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -84,7 +86,13 @@ func New(d Deps) *fiber.App {
 		IdleTimeout:       idleTimeout,
 	})
 
-	app.Use(recover.New())
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+		StackTraceHandler: func(c fiber.Ctx, e any) {
+			d.Log.ErrorContext(c.Context(), "panic recovered",
+				"request_id", requestid.FromContext(c), "panic", fmt.Sprint(e), "stack", string(debug.Stack()))
+		},
+	}))
 	app.Use(requestid.New())
 	app.Use(helmet.New())
 	app.Use(limiter.New(limiter.Config{Max: rateLimitPerMin, Expiration: time.Minute}))
