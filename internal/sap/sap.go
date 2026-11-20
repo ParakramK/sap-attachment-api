@@ -13,15 +13,19 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/parakram/sap-attachment-api/internal/config"
 )
 
-const (
-	requestTimeout = 30 * time.Second
-	maxErrorBody   = 512
-)
+const requestTimeout = 30 * time.Second
+
+// SAP sessions expire after ~30 minutes; re-login at 25 to keep them warm.
+// A var so tests can shorten the interval.
+var refreshInterval = 25 * time.Minute
+
+const maxErrorBody = 512
 
 // Client talks to the SAP Service Layer. A nil *Client means the integration
 // is not configured and uploads simply skip it.
@@ -31,6 +35,9 @@ type Client struct {
 	username string
 	password string
 	http     *http.Client // carries the SESSIONID cookie from login to calls
+
+	mu        sync.Mutex
+	lastLogin time.Time
 }
 
 // New returns nil (no error) when SAP settings are absent.
@@ -67,19 +74,57 @@ type attachmentRequest struct {
 	Lines []attachmentLine `json:"Attachments2_Lines"`
 }
 
+// Start logs in immediately and refreshes the session every 25 minutes, so
+// it stays warm even when no uploads arrive. It returns when ctx is canceled.
+// A failed refresh is ignored here: the next upload retries the login.
+func (c *Client) Start(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	c.refresh(ctx)
+	ticker := time.NewTicker(refreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.refresh(ctx)
+		}
+	}
+}
+
+func (c *Client) refresh(ctx context.Context) {
+	refreshCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	_ = c.ensureSession(refreshCtx)
+}
+
+// ensureSession reuses the current session until it approaches expiry.
+func (c *Client) ensureSession(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.lastLogin.IsZero() && time.Since(c.lastLogin) < refreshInterval {
+		return nil
+	}
+	if err := c.login(ctx); err != nil {
+		return err
+	}
+	c.lastLogin = time.Now()
+	return nil
+}
+
 // CreateAttachment logs in and registers one stored file, returning SAP's
 // AbsoluteEntry id. SAP needs all three line fields: SourcePath is the
 // directory as seen by the SAP host, FileName the stored key and
 // FileExtension its extension — with only SourcePath, SAP creates an entry
 // with null name/extension.
-//
-// shortcut: logs in on every upload; cache the session when upload volume
-// warrants it (and refresh on 401).
+// CreateAttachment registers one stored file, returning SAP's AbsoluteEntry id.
 func (c *Client) CreateAttachment(ctx context.Context, storagePath string) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	if err := c.login(ctx); err != nil {
+	if err := c.ensureSession(ctx); err != nil {
 		return 0, err
 	}
 

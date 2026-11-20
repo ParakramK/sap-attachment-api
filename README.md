@@ -67,7 +67,8 @@ Set all four of `SAP_DATABASE`, `SAP_SERVICE_LAYER_URL`, `SAP_USERNAME` and
 `SAP_PASSWORD` to register each newly stored file in SAP through Service
 Layer: log in (`/b1s/v1/Login`), then `POST /b1s/v1/Attachments2` with
 `SourcePath` = the stored file's directory (`\\IP\nas\sales`), `FileName` =
-the stored key and `FileExtension` = its extension. SAP must be able to read
+the stored key and `FileExtension` = its extension. The session is kept warm:
+it is refreshed every 25 minutes and reused between uploads. SAP must be able to read
 that directory. A duplicate (deduplicated) upload creates no new entry. If
 the SAP call fails, the API returns `502` but keeps the file and record; a
 later upload of the same content retries only the SAP entry. Responses

@@ -74,6 +74,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init SAP client: %w", err)
 	}
+	go sapClient.Start(ctx) // nil-safe; keeps the SAP session warm (25 min refresh)
 
 	// Startup reconciliation: clean orphan staging files, resolve rows stuck
 	// in staged. Failures are logged but not fatal — the service still runs.

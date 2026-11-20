@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/parakram/sap-attachment-api/internal/config"
 )
@@ -100,6 +102,65 @@ func TestCreateAttachmentLoginFailure(t *testing.T) {
 	}
 	if _, err := client.CreateAttachment(context.Background(), "/data/a.pdf"); err == nil {
 		t.Fatal("expected error after failed login")
+	}
+}
+
+func TestSessionReuseAndWarmRefresh(t *testing.T) {
+	old := refreshInterval
+	refreshInterval = 100 * time.Millisecond
+	t.Cleanup(func() { refreshInterval = old })
+
+	var logins atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/b1s/v1/Login":
+			logins.Add(1)
+			http.SetCookie(w, &http.Cookie{Name: "SESSIONID", Value: "s", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		case "/b1s/v1/Attachments2":
+			_, _ = w.Write([]byte(`{"AbsoluteEntry":42}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := New(testConfig(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { client.Start(ctx); close(done) }()
+
+	// Burst of uploads reuses one login.
+	for range 2 {
+		if _, err := client.CreateAttachment(ctx, "/data/a.pdf"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := logins.Load(); got != 1 {
+		t.Fatalf("logins after two uploads = %d, want 1", got)
+	}
+
+	// The background loop refreshes without any uploads.
+	deadline := time.Now().Add(3 * time.Second)
+	for logins.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if logins.Load() < 2 {
+		t.Fatalf("session was not refreshed (logins=%d)", logins.Load())
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Start did not stop on context cancellation")
+	}
+	count := logins.Load()
+	time.Sleep(250 * time.Millisecond)
+	if logins.Load() != count {
+		t.Fatal("refresh continued after cancellation")
 	}
 }
 
