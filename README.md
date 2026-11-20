@@ -61,6 +61,18 @@ curl -X POST localhost:8080/v1/attachments \
 
 See `.env.example` for the full option list, including HTTP/S3 fetch settings.
 
+## SAP attachment entries (optional)
+
+Set all four of `SAP_DATABASE`, `SAP_SERVICE_LAYER_URL`, `SAP_USERNAME` and
+`SAP_PASSWORD` to register each newly stored file in SAP through Service
+Layer: log in (`/b1s/v1/Login`), then `POST /b1s/v1/Attachments2` with
+`SourcePath` = the stored file's directory (`\\IP\nas\sales`), `FileName` =
+the stored key and `FileExtension` = its extension. SAP must be able to read
+that directory. A duplicate (deduplicated) upload creates no new entry. If
+the SAP call fails, the API returns `502` but keeps the file and record so
+the entry can be retried with the same idempotency key. Use
+`SAP_INSECURE_SKIP_VERIFY=true` only for self-signed SAP certificates.
+
 ## Development and releases
 
 ```sh

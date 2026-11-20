@@ -15,6 +15,7 @@ import (
 	"github.com/parakram/sap-attachment-api/internal/db"
 	"github.com/parakram/sap-attachment-api/internal/fetch"
 	"github.com/parakram/sap-attachment-api/internal/logging"
+	"github.com/parakram/sap-attachment-api/internal/sap"
 	"github.com/parakram/sap-attachment-api/internal/server"
 	"github.com/parakram/sap-attachment-api/internal/service"
 	"github.com/parakram/sap-attachment-api/internal/storage"
@@ -69,6 +70,11 @@ func run() error {
 		return fmt.Errorf("init remote fetcher: %w", err)
 	}
 
+	sapClient, err := sap.New(cfg)
+	if err != nil {
+		return fmt.Errorf("init SAP client: %w", err)
+	}
+
 	// Startup reconciliation: clean orphan staging files, resolve rows stuck
 	// in staged. Failures are logged but not fatal — the service still runs.
 	sweeper := service.NewSweeper(repo, backend, cfg.StagingDir, time.Hour)
@@ -98,6 +104,7 @@ func run() error {
 		Store:    backend,
 		Uploader: uploader,
 		Fetcher:  fetcher,
+		SAP:      sapClient,
 	})
 
 	errCh := make(chan error, 1)

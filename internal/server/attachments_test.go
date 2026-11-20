@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -35,6 +36,10 @@ type apiFixture struct {
 // newAPI builds a fully wired app against temp dirs. Keys configures API
 // keys (nil disables auth); extra mutates the config before wiring.
 func newAPI(t *testing.T, keys []string, extra func(*config.Config)) *apiFixture {
+	return newAPIWithSAP(t, keys, extra, nil)
+}
+
+func newAPIWithSAP(t *testing.T, keys []string, extra func(*config.Config), client server.SAPClient) *apiFixture {
 	t.Helper()
 	cfg := testConfig()
 	cfg.DBPath = filepath.Join(t.TempDir(), "test.db") // per-test DB: dedupe must not see earlier runs
@@ -75,6 +80,7 @@ func newAPI(t *testing.T, keys []string, extra func(*config.Config)) *apiFixture
 		Store:    store,
 		Uploader: uploader,
 		Fetcher:  fetcher,
+		SAP:      client,
 	})
 	return &apiFixture{app: app, store: store, dir: dir}
 }
@@ -417,6 +423,53 @@ func TestIdempotencyKeyRequired(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeSAP struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeSAP) CreateAttachment(_ context.Context, path string) error {
+	f.calls = append(f.calls, path)
+	return f.err
+}
+
+func TestSAPEntryCreatedAfterUpload(t *testing.T) {
+	sap := &fakeSAP{}
+	f := newAPIWithSAP(t, nil, nil, sap)
+
+	created := decode[attachmentShape](t, doMultipart(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", ""))
+	if len(sap.calls) != 1 || sap.calls[0] != created.StoragePath {
+		t.Fatalf("sap calls = %v, want %q", sap.calls, created.StoragePath)
+	}
+
+	// A deduplicated re-upload must not create a second SAP entry.
+	resp := doMultipart(t, f.app, "/v1/attachments", "order2.jpg", "%PDF-1.4 order", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dedupe status = %d", resp.StatusCode)
+	}
+	if len(sap.calls) != 1 {
+		t.Fatalf("sap calls after dedupe = %v", sap.calls)
+	}
+}
+
+func TestSAPFailureReturns502AndKeepsFile(t *testing.T) {
+	sap := &fakeSAP{err: errors.New("service layer down")}
+	f := newAPIWithSAP(t, nil, nil, sap)
+
+	resp := doMultipart(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", "")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	if len(sap.calls) != 1 {
+		t.Fatalf("sap calls = %v", sap.calls)
+	}
+	// The file and row survive: the entry can be created later.
+	if _, err := os.Stat(sap.calls[0]); err != nil {
+		t.Fatalf("stored file missing after SAP failure: %v", err)
+	}
+	// A later successful request with the same idempotency key can retry.
 }
 
 func TestDeleteEndpointDisabled(t *testing.T) {

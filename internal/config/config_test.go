@@ -151,6 +151,30 @@ func TestLevelParsing(t *testing.T) {
 	}
 }
 
+func TestValidateSAPRules(t *testing.T) {
+	c := validConfig()
+	if err := c.Validate(); err != nil {
+		t.Fatalf("SAP disabled should be valid: %v", err)
+	}
+
+	c.SAPDatabase = "SBODEMO" // partial config
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for partial SAP config")
+	}
+
+	c.SAPServiceLayerURL = "not-a-url"
+	c.SAPUsername = "manager"
+	c.SAPPassword = "secret"
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for malformed SAP URL")
+	}
+
+	c.SAPServiceLayerURL = "https://sap-host:50000"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("complete SAP config rejected: %v", err)
+	}
+}
+
 func TestLoadReadsDotEnvAndEnvWins(t *testing.T) {
 	dir := t.TempDir()
 	content := "APP_ENV=dev\nADDR=:8080\nAPI_KEYS=from-file\nMAX_UPLOAD_MB=7\n" +

@@ -25,6 +25,11 @@ import (
 )
 
 // Deps carries everything the server needs; constructed in main.
+// SAPClient is consumer-defined so tests can fake it.
+type SAPClient interface {
+	CreateAttachment(ctx context.Context, storagePath string) error
+}
+
 type Deps struct {
 	Cfg      *config.Config
 	Log      *slog.Logger
@@ -33,6 +38,7 @@ type Deps struct {
 	Store    storage.Storage
 	Uploader *service.Uploader
 	Fetcher  *fetch.Fetcher
+	SAP      SAPClient
 }
 
 // Connection timeouts: uploads stream slowly on constrained links, so reads

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -74,6 +75,14 @@ type Config struct {
 	// credentials can read.
 	S3AllowedBuckets []string      `env:"S3_ALLOWED_BUCKETS" env-separator:","`
 	FetchTimeout     time.Duration `env:"FETCH_TIMEOUT" env-default:"60s"`
+
+	// Optional SAP Service Layer integration: after a new file is committed,
+	// register it as an attachment entry. Disabled when unset.
+	SAPDatabase        string `env:"SAP_DATABASE"`
+	SAPServiceLayerURL string `env:"SAP_SERVICE_LAYER_URL"` // e.g. https://sap-host:50000
+	SAPUsername        string `env:"SAP_USERNAME"`
+	SAPPassword        string `env:"SAP_PASSWORD"` // secret
+	SAPInsecureTLS     bool   `env:"SAP_INSECURE_SKIP_VERIFY" env-default:"false"`
 
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-default:"15s"`
 }
@@ -173,6 +182,24 @@ func (c Config) Validate() error {
 	}
 	if c.MaxUploadMB <= 0 {
 		return errors.New("MAX_UPLOAD_MB must be positive")
+	}
+	sapFields := []string{c.SAPDatabase, c.SAPServiceLayerURL, c.SAPUsername, c.SAPPassword}
+	sapSet, sapUnset := 0, 0
+	for _, v := range sapFields {
+		if strings.TrimSpace(v) != "" {
+			sapSet++
+		} else {
+			sapUnset++
+		}
+	}
+	if sapSet != 0 && sapUnset != 0 {
+		return errors.New("SAP_DATABASE, SAP_SERVICE_LAYER_URL, SAP_USERNAME and SAP_PASSWORD must all be set together")
+	}
+	if sapSet > 0 {
+		u, err := url.Parse(c.SAPServiceLayerURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("SAP_SERVICE_LAYER_URL must be an http(s) URL, e.g. https://sap-host:50000")
+		}
 	}
 	if c.ShutdownTimeout <= 0 {
 		return errors.New("SHUTDOWN_TIMEOUT must be positive")
