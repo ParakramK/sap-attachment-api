@@ -9,6 +9,8 @@ package logging
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -28,7 +30,20 @@ const asyncQueueSize = 4096
 // New returns the application logger and a Close func that flushes the
 // remote sink (idempotent, safe to defer and to call on shutdown).
 func New(cfg *config.Config) (*slog.Logger, func(context.Context)) {
-	stdout := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.Level()})
+	sink := io.Writer(os.Stdout)
+	var rotator *dailyRotator
+	logsDir, err := executableLogsDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "file logging disabled:", err)
+	} else if rotator, err = newDailyRotator(logsDir); err != nil {
+		fmt.Fprintln(os.Stderr, "file logging disabled:", err)
+		rotator = nil
+	}
+	if rotator != nil {
+		// One handler, two writers: stdout and the daily file get identical JSON.
+		sink = io.MultiWriter(os.Stdout, rotator)
+	}
+	stdout := slog.NewJSONHandler(sink, &slog.HandlerOptions{Level: cfg.Level()})
 
 	var remote slog.Handler
 	flush := func(context.Context) {}
@@ -48,7 +63,13 @@ func New(cfg *config.Config) (*slog.Logger, func(context.Context)) {
 	}
 
 	slog.SetDefault(slog.New(handler))
-	return slog.Default(), flush
+	closeAll := func(ctx context.Context) {
+		flush(ctx)
+		if rotator != nil {
+			_ = rotator.Close()
+		}
+	}
+	return slog.Default(), closeAll
 }
 
 // asyncCore owns the queue, the worker, and lifecycle state shared across

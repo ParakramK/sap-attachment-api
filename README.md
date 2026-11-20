@@ -23,7 +23,8 @@ never baked in**. At startup the service reads `./.env`, or an explicit file:
 Real environment variables override the file. Set `PORT=9090` (or
 `ADDR=:9090`) in it to change the listen port. Health: `/healthz`, readiness:
 `/readyz`, docs: `/docs`, contract: `/openapi.yaml`. All variables are listed
-in `.env.example`.
+in `.env.example`. Logs go to stdout **and** to `logs/` next to the
+executable, one JSON file per day.
 
 ## API
 
