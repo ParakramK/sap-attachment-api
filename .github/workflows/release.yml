@@ -32,6 +32,8 @@ jobs:
         id: meta
         env:
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_EVENT: ${{ github.event.workflow_run.event }}
+          CI_REF: ${{ github.event.workflow_run.head_branch }}
           DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
@@ -42,7 +44,15 @@ jobs:
               echo "CI run did not pass (conclusion: $CONCLUSION)" >&2
               exit 1
             fi
-            version=$(git tag --points-at HEAD | grep '^v' | head -1 || true)
+            # Only a CI run triggered by a v* tag push may release. Without
+            # this, a branch-push CI run finishing after the tag is pushed
+            # sees the tag and starts a duplicate release.
+            if [ "$CI_EVENT" != push ] || [[ "$CI_REF" != v* ]]; then
+              echo "CI run was not for a v* tag ($CI_EVENT/$CI_REF) — nothing to release."
+              version=""
+            else
+              version=$(git tag --points-at HEAD | grep '^v' | head -1 || true)
+            fi
           fi
           if [ -z "$version" ]; then
             echo "No v* tag on this commit — nothing to release."
@@ -123,4 +133,9 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             extra+=(--target "${{ needs.prepare.outputs.sha }}")
           fi
-          gh release create "$VERSION" dist/* --generate-notes "${extra[@]}"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            # Re-run of an existing release: refresh assets instead of failing.
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            gh release create "$VERSION" dist/* --generate-notes "${extra[@]}"
+          fi
