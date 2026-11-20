@@ -69,8 +69,8 @@ Layer: log in (`/b1s/v1/Login`), then `POST /b1s/v1/Attachments2` with
 `SourcePath` = the stored file's directory (`\\IP\nas\sales`), `FileName` =
 the stored key and `FileExtension` = its extension. SAP must be able to read
 that directory. A duplicate (deduplicated) upload creates no new entry. If
-the SAP call fails, the API returns `502` but keeps the file and record so
-the entry can be retried with the same idempotency key. Use
+the SAP call fails, the API returns `502` but keeps the file and record; a
+later upload of the same content retries only the SAP entry. Use
 `SAP_INSECURE_SKIP_VERIFY=true` only for self-signed SAP certificates.
 
 ## Development and releases

@@ -88,15 +88,19 @@ func createAttachment(d Deps) fiber.Handler {
 			return uploadError(err)
 		}
 
-		// Register in SAP only for newly stored content. On failure the file
-		// and row stay put so the entry can be created later; the caller gets
-		// 502 and can retry with the same idempotency key.
-		if !deduped && d.SAP != nil {
+		// Register in SAP for new content, and retry registration for a row
+		// whose earlier SAP call failed (the upload itself is deduplicated).
+		// On failure the file and row stay put; the caller gets 502.
+		if d.SAP != nil && !att.SAPRegistered {
 			if err := d.SAP.CreateAttachment(c.Context(), att.StoragePath); err != nil {
 				d.Log.WarnContext(c.Context(), "sap attachment failed",
 					"err", err, "storage_path", att.StoragePath)
 				return fiber.NewError(http.StatusBadGateway, "failed to register attachment in SAP")
 			}
+			if err := d.Repo.MarkSAPRegistered(c.Context(), att.ID); err != nil {
+				return fiber.NewError(http.StatusInternalServerError, "failed to record SAP attachment entry")
+			}
+			att.SAPRegistered = true
 		}
 
 		status := http.StatusCreated

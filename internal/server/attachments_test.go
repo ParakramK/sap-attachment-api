@@ -458,18 +458,32 @@ func TestSAPFailureReturns502AndKeepsFile(t *testing.T) {
 	sap := &fakeSAP{err: errors.New("service layer down")}
 	f := newAPIWithSAP(t, nil, nil, sap)
 
-	resp := doMultipart(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", "")
+	key := "a5555555-6666-4777-8555-666666666666"
+	resp := doMultipartWithKey(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", "", key)
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
 	if len(sap.calls) != 1 {
 		t.Fatalf("sap calls = %v", sap.calls)
 	}
-	// The file and row survive: the entry can be created later.
+	// The file and row survive; retrying the same key retries only the SAP
+	// entry creation (the upload itself is deduplicated).
 	if _, err := os.Stat(sap.calls[0]); err != nil {
 		t.Fatalf("stored file missing after SAP failure: %v", err)
 	}
-	// A later successful request with the same idempotency key can retry.
+	sap.err = nil
+	resp = doMultipartWithKey(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", "", key)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200", resp.StatusCode)
+	}
+	if len(sap.calls) != 2 {
+		t.Fatalf("sap calls after retry = %v", sap.calls)
+	}
+	// A third attempt must not create another SAP entry.
+	resp = doMultipartWithKey(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", "", key)
+	if resp.StatusCode != http.StatusOK || len(sap.calls) != 2 {
+		t.Fatalf("status = %d, sap calls = %v", resp.StatusCode, sap.calls)
+	}
 }
 
 func TestDeleteEndpointDisabled(t *testing.T) {
