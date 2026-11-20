@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,18 +67,20 @@ type attachmentRequest struct {
 	Lines []attachmentLine `json:"Attachments2_Lines"`
 }
 
-// CreateAttachment logs in and registers one stored file. SourcePath is the
-// directory as seen by the SAP host; FileName is the stored file name without
-// its extension, and FileExtension is the extension without the dot.
+// CreateAttachment logs in and registers one stored file, returning SAP's
+// AbsoluteEntry id. SAP needs all three line fields: SourcePath is the
+// directory as seen by the SAP host, FileName the stored key and
+// FileExtension its extension — with only SourcePath, SAP creates an entry
+// with null name/extension.
 //
 // shortcut: logs in on every upload; cache the session when upload volume
 // warrants it (and refresh on 401).
-func (c *Client) CreateAttachment(ctx context.Context, storagePath string) error {
+func (c *Client) CreateAttachment(ctx context.Context, storagePath string) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
 	if err := c.login(ctx); err != nil {
-		return err
+		return 0, err
 	}
 
 	dir, name, ext := splitPath(storagePath)
@@ -85,26 +88,36 @@ func (c *Client) CreateAttachment(ctx context.Context, storagePath string) error
 		Lines: []attachmentLine{{FileExtension: ext, FileName: name, SourcePath: dir}},
 	})
 	if err != nil {
-		return fmt.Errorf("sap encode attachment: %w", err)
+		return 0, fmt.Errorf("sap encode attachment: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.base+"/b1s/v1/Attachments2", bytes.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("sap attachment request: %w", err)
+		return 0, fmt.Errorf("sap attachment request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("sap attachment call: %w", err)
+		return 0, fmt.Errorf("sap attachment call: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("sap attachment status %d: %s", resp.StatusCode, errorBody(resp))
+		return 0, fmt.Errorf("sap attachment status %d: %s", resp.StatusCode, errorBody(resp))
 	}
-	return nil
+
+	var result struct {
+		AbsoluteEntry int64 `json:"AbsoluteEntry"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("sap attachment decode: %w", err)
+	}
+	if result.AbsoluteEntry == 0 {
+		return 0, errors.New("sap attachment response missing AbsoluteEntry")
+	}
+	return result.AbsoluteEntry, nil
 }
 
 func (c *Client) login(ctx context.Context) error {

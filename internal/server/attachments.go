@@ -30,6 +30,8 @@ type attachmentResponse struct {
 	StoragePath string `json:"storage_path"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
+	// SAP attachment entry id (0 when SAP integration is disabled).
+	SAPAbsoluteEntry int64 `json:"sap_absolute_entry,omitempty"`
 }
 
 func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
@@ -40,15 +42,16 @@ func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
 		ref = store.Reference(a.ObjectPath)
 	}
 	return attachmentResponse{
-		ID:          a.ID,
-		Filename:    a.Filename,
-		ContentType: a.ContentType,
-		SizeBytes:   a.SizeBytes,
-		SHA256:      a.SHA256,
-		Status:      a.Status,
-		StoragePath: ref,
-		CreatedAt:   a.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   a.UpdatedAt.Format(time.RFC3339),
+		ID:               a.ID,
+		Filename:         a.Filename,
+		ContentType:      a.ContentType,
+		SizeBytes:        a.SizeBytes,
+		SHA256:           a.SHA256,
+		Status:           a.Status,
+		StoragePath:      ref,
+		CreatedAt:        a.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:        a.UpdatedAt.Format(time.RFC3339),
+		SAPAbsoluteEntry: a.SAPAbsoluteEntry,
 	}
 }
 
@@ -92,15 +95,17 @@ func createAttachment(d Deps) fiber.Handler {
 		// whose earlier SAP call failed (the upload itself is deduplicated).
 		// On failure the file and row stay put; the caller gets 502.
 		if d.SAP != nil && !att.SAPRegistered {
-			if err := d.SAP.CreateAttachment(c.Context(), att.StoragePath); err != nil {
+			entry, err := d.SAP.CreateAttachment(c.Context(), att.StoragePath)
+			if err != nil {
 				d.Log.WarnContext(c.Context(), "sap attachment failed",
 					"err", err, "storage_path", att.StoragePath)
 				return fiber.NewError(http.StatusBadGateway, "failed to register attachment in SAP")
 			}
-			if err := d.Repo.MarkSAPRegistered(c.Context(), att.ID); err != nil {
+			if err := d.Repo.MarkSAPRegistered(c.Context(), att.ID, entry); err != nil {
 				return fiber.NewError(http.StatusInternalServerError, "failed to record SAP attachment entry")
 			}
 			att.SAPRegistered = true
+			att.SAPAbsoluteEntry = entry
 		}
 
 		status := http.StatusCreated

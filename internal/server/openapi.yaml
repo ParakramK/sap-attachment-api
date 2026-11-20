@@ -238,6 +238,10 @@ components:
             SHA-256 is kept in the database only, never in the path.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        sap_absolute_entry:
+          type: integer
+          format: int64
+          description: AbsoluteEntry id returned by SAP Service Layer when the attachment entry was created; absent when SAP integration is disabled.
     Error:
       type: object
       properties:

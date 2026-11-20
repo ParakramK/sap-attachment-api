@@ -70,8 +70,9 @@ Layer: log in (`/b1s/v1/Login`), then `POST /b1s/v1/Attachments2` with
 the stored key and `FileExtension` = its extension. SAP must be able to read
 that directory. A duplicate (deduplicated) upload creates no new entry. If
 the SAP call fails, the API returns `502` but keeps the file and record; a
-later upload of the same content retries only the SAP entry. Use
-`SAP_INSECURE_SKIP_VERIFY=true` only for self-signed SAP certificates.
+later upload of the same content retries only the SAP entry. Responses
+include `sap_absolute_entry` (SAP's `AbsoluteEntry` id) once registered.
+Use `SAP_INSECURE_SKIP_VERIFY=true` only for self-signed SAP certificates.
 
 ## Development and releases
 

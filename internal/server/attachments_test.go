@@ -189,13 +189,14 @@ func TestCreateAndGetAttachment(t *testing.T) {
 }
 
 type attachmentShape struct {
-	ID          string `json:"id"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
-	SHA256      string `json:"sha256"`
-	Status      string `json:"status"`
-	StoragePath string `json:"storage_path"`
+	ID               string `json:"id"`
+	Filename         string `json:"filename"`
+	ContentType      string `json:"content_type"`
+	SizeBytes        int64  `json:"size_bytes"`
+	SHA256           string `json:"sha256"`
+	Status           string `json:"status"`
+	StoragePath      string `json:"storage_path"`
+	SAPAbsoluteEntry int64  `json:"sap_absolute_entry"`
 }
 
 func TestCreateDedupeReturnsExisting(t *testing.T) {
@@ -427,21 +428,30 @@ func TestIdempotencyKeyRequired(t *testing.T) {
 
 type fakeSAP struct {
 	calls []string
+	entry int64
 	err   error
 }
 
-func (f *fakeSAP) CreateAttachment(_ context.Context, path string) error {
+func (f *fakeSAP) CreateAttachment(_ context.Context, path string) (int64, error) {
 	f.calls = append(f.calls, path)
-	return f.err
+	return f.entry, f.err
 }
 
 func TestSAPEntryCreatedAfterUpload(t *testing.T) {
-	sap := &fakeSAP{}
+	sap := &fakeSAP{entry: 148076}
 	f := newAPIWithSAP(t, nil, nil, sap)
 
 	created := decode[attachmentShape](t, doMultipart(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", ""))
 	if len(sap.calls) != 1 || sap.calls[0] != created.StoragePath {
 		t.Fatalf("sap calls = %v, want %q", sap.calls, created.StoragePath)
+	}
+	if created.SAPAbsoluteEntry != 148076 {
+		t.Fatalf("sap_absolute_entry = %d, want 148076", created.SAPAbsoluteEntry)
+	}
+	// It is persisted: GET returns the same id.
+	got := decode[attachmentShape](t, doJSON(t, f.app, http.MethodGet, "/v1/attachments/"+created.ID, "", ""))
+	if got.SAPAbsoluteEntry != 148076 {
+		t.Fatalf("GET sap_absolute_entry = %d", got.SAPAbsoluteEntry)
 	}
 
 	// A deduplicated re-upload must not create a second SAP entry.
@@ -472,9 +482,13 @@ func TestSAPFailureReturns502AndKeepsFile(t *testing.T) {
 		t.Fatalf("stored file missing after SAP failure: %v", err)
 	}
 	sap.err = nil
+	sap.entry = 148077
 	resp = doMultipartWithKey(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", "", key)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("retry status = %d, want 200", resp.StatusCode)
+	}
+	if decode[attachmentShape](t, resp).SAPAbsoluteEntry != 148077 {
+		t.Fatal("retry response missing SAP AbsoluteEntry")
 	}
 	if len(sap.calls) != 2 {
 		t.Fatalf("sap calls after retry = %v", sap.calls)

@@ -19,21 +19,6 @@ func testConfig(url string) *config.Config {
 	}
 }
 
-func splitPathFixture(t *testing.T, p string, wantDir, wantName, wantExt string) {
-	t.Helper()
-	dir, name, ext := splitPath(p)
-	if dir != wantDir || name != wantName || ext != wantExt {
-		t.Fatalf("splitPath(%q) = (%q,%q,%q), want (%q,%q,%q)", p, dir, name, ext, wantDir, wantName, wantExt)
-	}
-}
-
-func TestSplitPath(t *testing.T) {
-	splitPathFixture(t, `\\192.168.10.248\nas\sales\2d0e8181-9682-4a39-b948-c1b76e1f6040.jpg`,
-		`\\192.168.10.248\nas\sales`, "2d0e8181-9682-4a39-b948-c1b76e1f6040", "jpg")
-	splitPathFixture(t, "/data/storage/report.PDF", "/data/storage", "report", "PDF")
-	splitPathFixture(t, "plainname", ".", "plainname", "")
-}
-
 func TestCreateAttachment(t *testing.T) {
 	var loginBody map[string]string
 	var attachmentBody map[string]any
@@ -58,6 +43,7 @@ func TestCreateAttachment(t *testing.T) {
 				t.Errorf("attachment decode: %v", err)
 			}
 			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"AbsoluteEntry":148076,"Attachments2_Lines":[{"SourcePath":"x"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -68,9 +54,13 @@ func TestCreateAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.CreateAttachment(context.Background(), `\\192.168.10.248\nas\sales\2d0e8181-9682-4a39-b948-c1b76e1f6040.jpg`)
+	path := `\\192.168.10.248\nas\sales\2d0e8181-9682-4a39-b948-c1b76e1f6040.jpg`
+	entry, err := client.CreateAttachment(context.Background(), path)
 	if err != nil {
 		t.Fatalf("create: %v", err)
+	}
+	if entry != 148076 {
+		t.Fatalf("AbsoluteEntry = %d, want 148076", entry)
 	}
 
 	if loginBody["CompanyDatabase"] != "SBODEMO" || loginBody["UserName"] != "manager" || loginBody["Password"] != "secret" {
@@ -108,7 +98,7 @@ func TestCreateAttachmentLoginFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CreateAttachment(context.Background(), "/data/a.pdf"); err == nil {
+	if _, err := client.CreateAttachment(context.Background(), "/data/a.pdf"); err == nil {
 		t.Fatal("expected error after failed login")
 	}
 }

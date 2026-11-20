@@ -23,18 +23,19 @@ const (
 type Attachment struct {
 	bun.BaseModel `bun:"table:attachments,alias:att"`
 
-	ID            string    `bun:"id,pk"`
-	Filename      string    `bun:"filename,notnull"`
-	ContentType   string    `bun:"content_type,notnull"`
-	SizeBytes     int64     `bun:"size_bytes,notnull"`
-	SHA256        string    `bun:"sha256,notnull"`
-	Status        string    `bun:"status,notnull"`
-	Backend       string    `bun:"backend,notnull"`        // storage backend holding the object
-	ObjectPath    string    `bun:"object_path,notnull"`    // backend-neutral, base-free
-	StoragePath   string    `bun:"storage_path,notnull"`   // full consumer-facing path (absolute/UNC)
-	SAPRegistered bool      `bun:"sap_registered,notnull"` // SAP attachment entry created?
-	CreatedAt     time.Time `bun:"created_at,notnull"`
-	UpdatedAt     time.Time `bun:"updated_at,notnull"`
+	ID               string    `bun:"id,pk"`
+	Filename         string    `bun:"filename,notnull"`
+	ContentType      string    `bun:"content_type,notnull"`
+	SizeBytes        int64     `bun:"size_bytes,notnull"`
+	SHA256           string    `bun:"sha256,notnull"`
+	Status           string    `bun:"status,notnull"`
+	Backend          string    `bun:"backend,notnull"`            // storage backend holding the object
+	ObjectPath       string    `bun:"object_path,notnull"`        // backend-neutral, base-free
+	StoragePath      string    `bun:"storage_path,notnull"`       // full consumer-facing path (absolute/UNC)
+	SAPRegistered    bool      `bun:"sap_registered,notnull"`     // SAP attachment entry created?
+	SAPAbsoluteEntry int64     `bun:"sap_absolute_entry,notnull"` // AbsoluteEntry id from SAP
+	CreatedAt        time.Time `bun:"created_at,notnull"`
+	UpdatedAt        time.Time `bun:"updated_at,notnull"`
 }
 
 func NewAttachment() *Attachment {
@@ -104,11 +105,12 @@ func (r *Repo) MarkAvailable(ctx context.Context, id string) error {
 	return err
 }
 
-// MarkSAPRegistered records that the Service Layer entry was created.
-func (r *Repo) MarkSAPRegistered(ctx context.Context, id string) error {
+// MarkSAPRegistered records the SAP entry id and marks registration done.
+func (r *Repo) MarkSAPRegistered(ctx context.Context, id string, absoluteEntry int64) error {
 	_, err := r.d.NewUpdate().
 		Model((*Attachment)(nil)).
 		Set("sap_registered = ?", true).
+		Set("sap_absolute_entry = ?", absoluteEntry).
 		Set("updated_at = ?", time.Now()).
 		Where("id = ?", id).
 		Exec(ctx)
