@@ -29,6 +29,7 @@ type Config struct {
 
 	LogLevel     string `env:"LOG_LEVEL" env-default:"info"`
 	LogtailToken string `env:"LOGTAIL_TOKEN"` // Better Stack source token (secret)
+	LogtailHost  string `env:"LOGTAIL_HOST"`  // ingesting host; empty = library default
 	LogtailLevel string `env:"LOGTAIL_LEVEL" env-default:"info"`
 	// SQL_DEBUG dumps every SQL statement (bundebug). Off by default: even
 	// normal misses like "no rows" would otherwise flood the logs.

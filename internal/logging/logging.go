@@ -13,11 +13,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	slogbetterstack "github.com/samber/slog-betterstack"
+	slogbetterstack "github.com/BetterStackHQ/slog-betterstack"
 	"github.com/samber/slog-multi"
 
 	"github.com/parakram/sap-attachment-api/internal/config"
@@ -48,11 +48,16 @@ func New(cfg *config.Config) (*slog.Logger, func(context.Context)) {
 	var remote slog.Handler
 	flush := func(context.Context) {}
 	if cfg.LogtailToken != "" {
-		a := newAsyncHandler(slogbetterstack.Option{
-			Level:   cfg.RemoteLevel(),
-			Token:   cfg.LogtailToken,
-			Timeout: 10 * time.Second,
-		}.NewBetterstackHandler(), asyncQueueSize)
+		opts := slogbetterstack.Option{
+			Level:           cfg.RemoteLevel(),
+			Token:           cfg.LogtailToken,
+			ShutdownTimeout: cfg.ShutdownTimeout,
+		}
+		if cfg.LogtailHost != "" {
+			// Guide: Endpoint = https://$INGESTING_HOST/
+			opts.Endpoint = "https://" + strings.TrimSuffix(strings.TrimPrefix(cfg.LogtailHost, "https://"), "/") + "/"
+		}
+		a := newAsyncHandler(opts.NewBetterstackHandler(), asyncQueueSize)
 		remote = a
 		flush = a.Close
 	}
@@ -79,6 +84,7 @@ type asyncCore struct {
 	dropped   atomic.Int64
 	done      chan struct{}
 	closeOnce sync.Once
+	onClose   func() // flushes the underlying handler's batched records
 }
 
 // asyncHandler decouples a slow remote handler from callers: Handle enqueues,
@@ -90,6 +96,9 @@ type asyncHandler struct {
 
 func newAsyncHandler(next slog.Handler, queue int) *asyncHandler {
 	core := &asyncCore{ch: make(chan slog.Record, queue), done: make(chan struct{})}
+	if closer, ok := next.(interface{ Close() error }); ok {
+		core.onClose = func() { _ = closer.Close() }
+	}
 	go core.run(next)
 	return &asyncHandler{core: core, next: next}
 }
@@ -129,6 +138,9 @@ func (a *asyncHandler) Close(ctx context.Context) {
 		select {
 		case <-a.core.done:
 		case <-ctx.Done():
+		}
+		if a.core.onClose != nil {
+			a.core.onClose()
 		}
 	})
 }
