@@ -156,6 +156,16 @@ func decode[T any](t *testing.T, resp *http.Response) T {
 	return v
 }
 
+// POST responses are arrays; helper for the single-file cases.
+func decodeFirst(t *testing.T, resp *http.Response) attachmentShape {
+	t.Helper()
+	all := decode[[]attachmentShape](t, resp)
+	if len(all) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(all))
+	}
+	return all[0]
+}
+
 func TestCreateAndGetAttachment(t *testing.T) {
 	f := newAPI(t, nil, nil)
 
@@ -164,7 +174,7 @@ func TestCreateAndGetAttachment(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	created := decode[attachmentShape](t, resp)
+	created := decodeFirst(t, resp)
 	if created.Filename != key+".pdf" || created.Status != "available" {
 		t.Fatalf("created = %+v", created)
 	}
@@ -207,13 +217,13 @@ func TestCreateDedupeReturnsExisting(t *testing.T) {
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first status = %d", first.StatusCode)
 	}
-	a := decode[attachmentShape](t, first)
+	a := decodeFirst(t, first)
 
 	second := doMultipartWithKey(t, f.app, "/v1/attachments", "b.txt", "%PDF-1.4 same-bytes", "", newIdemKey())
 	if second.StatusCode != http.StatusOK {
 		t.Fatalf("second status = %d, want 200 (deduped)", second.StatusCode)
 	}
-	b := decode[attachmentShape](t, second)
+	b := decodeFirst(t, second)
 	if b.ID != a.ID || b.Filename != firstKey+".txt" {
 		t.Fatalf("dedupe returned %+v", b)
 	}
@@ -230,7 +240,7 @@ func TestFilenameIsKeyPlusOriginalExtension(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	created := decode[attachmentShape](t, resp)
+	created := decodeFirst(t, resp)
 	if created.Filename != key+".pdf" {
 		t.Fatalf("filename = %q, want %q", created.Filename, key+".pdf")
 	}
@@ -254,7 +264,7 @@ func TestCreateFromHTTPSource(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	created := decode[attachmentShape](t, resp)
+	created := decodeFirst(t, resp)
 	if created.Filename == "" || created.SizeBytes != int64(len("%PDF-1.4 downloaded content")) {
 		t.Fatalf("created = %+v", created)
 	}
@@ -294,7 +304,7 @@ func TestCreateFromS3Source(t *testing.T) {
 	}
 	// JSON requests use doJSON's generated key; just check the extension came
 	// from the remote filename (the key is asserted in TestFilenameIsKey...).
-	created := decode[attachmentShape](t, resp)
+	created := decodeFirst(t, resp)
 	if !strings.HasSuffix(created.Filename, ".txt") || strings.Contains(created.Filename, "file") {
 		t.Fatalf("created = %+v", created)
 	}
@@ -372,13 +382,13 @@ func TestIdempotencyReplaysResponse(t *testing.T) {
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first status = %d", first.StatusCode)
 	}
-	a := decode[attachmentShape](t, first)
+	a := decodeFirst(t, first)
 
 	second := send()
 	if second.StatusCode != http.StatusCreated {
 		t.Fatalf("replayed status = %d", second.StatusCode)
 	}
-	b := decode[attachmentShape](t, second)
+	b := decodeFirst(t, second)
 	if b.ID != a.ID {
 		t.Fatalf("replay returned different attachment: %s vs %s", b.ID, a.ID)
 	}
@@ -432,16 +442,20 @@ type fakeSAP struct {
 	err   error
 }
 
-func (f *fakeSAP) CreateAttachment(_ context.Context, path string) (int64, error) {
-	f.calls = append(f.calls, path)
-	return f.entry, f.err
+func (f *fakeSAP) CreateAttachments(_ context.Context, paths []string) ([]int64, error) {
+	f.calls = append(f.calls, paths...)
+	entries := make([]int64, len(paths))
+	for i := range entries {
+		entries[i] = f.entry + int64(i)
+	}
+	return entries, f.err
 }
 
 func TestSAPEntryCreatedAfterUpload(t *testing.T) {
 	sap := &fakeSAP{entry: 148076}
 	f := newAPIWithSAP(t, nil, nil, sap)
 
-	created := decode[attachmentShape](t, doMultipart(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", ""))
+	created := decodeFirst(t, doMultipart(t, f.app, "/v1/attachments", "order.jpg", "%PDF-1.4 order", ""))
 	if len(sap.calls) != 1 || sap.calls[0] != created.StoragePath {
 		t.Fatalf("sap calls = %v, want %q", sap.calls, created.StoragePath)
 	}
@@ -487,7 +501,7 @@ func TestSAPFailureReturns502AndKeepsFile(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("retry status = %d, want 200", resp.StatusCode)
 	}
-	if decode[attachmentShape](t, resp).SAPAbsoluteEntry != 148077 {
+	if decodeFirst(t, resp).SAPAbsoluteEntry != 148077 {
 		t.Fatal("retry response missing SAP AbsoluteEntry")
 	}
 	if len(sap.calls) != 2 {
@@ -500,9 +514,76 @@ func TestSAPFailureReturns502AndKeepsFile(t *testing.T) {
 	}
 }
 
+func TestCreateMultipleSources(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//nolint:gosec // G705: test server writes a fixed PDF prefix, not HTML
+		_, _ = fmt.Fprintf(w, "%%PDF-1.4 %s", strings.TrimPrefix(r.URL.Path, "/"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	sapClient := &fakeSAP{entry: 148076}
+	f := newAPIWithSAP(t, nil, nil, sapClient)
+	body := fmt.Sprintf(`{"sources":[{"source_url":%q},{"source_url":%q}]}`,
+		upstream.URL+"/first.pdf", upstream.URL+"/second.pdf")
+	resp := doJSON(t, f.app, http.MethodPost, "/v1/attachments", body, "")
+	// doJSON generated its own key; the response is still an array of two.
+	all := decode[[]attachmentShape](t, resp)
+	if resp.StatusCode != http.StatusCreated || len(all) != 2 {
+		t.Fatalf("status = %d, records = %+v", resp.StatusCode, all)
+	}
+	if all[0].Filename == all[1].Filename {
+		t.Fatalf("file names collide: %q", all[0].Filename)
+	}
+	if !strings.HasSuffix(all[1].Filename, "-2.pdf") {
+		t.Fatalf("second file name = %q, want key-2.pdf", all[1].Filename)
+	}
+	// One SAP call with both paths, one AbsoluteEntry per line.
+	if len(sapClient.calls) != 2 {
+		t.Fatalf("sap calls = %v", sapClient.calls)
+	}
+	if all[0].SAPAbsoluteEntry == 0 || all[1].SAPAbsoluteEntry == 0 {
+		t.Fatalf("missing sap entries: %+v", all)
+	}
+}
+
+func TestBatchValidatesAllSourcesBeforeCommitting(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "bad") {
+			_, _ = w.Write([]byte("plain text, not a pdf"))
+			return
+		}
+		_, _ = w.Write([]byte("%PDF-1.4 good"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	f := newAPI(t, nil, nil)
+	body := fmt.Sprintf(`{"sources":[{"source_url":%q},{"source_url":%q}]}`,
+		upstream.URL+"/good.pdf", upstream.URL+"/bad.txt")
+	resp := doJSON(t, f.app, http.MethodPost, "/v1/attachments", body, "")
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", resp.StatusCode)
+	}
+	entries, err := os.ReadDir(filepath.Join(f.dir, "storage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("first source was committed despite second failing: %v", entries)
+	}
+}
+
+func TestCreateRejectsMixedSourcesAndSingular(t *testing.T) {
+	f := newAPI(t, nil, nil)
+	resp := doJSON(t, f.app, http.MethodPost, "/v1/attachments",
+		`{"source_uri":"s3://b/k","sources":[{"source_url":"https://x/y"}]}`, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestDeleteEndpointDisabled(t *testing.T) {
 	f := newAPI(t, nil, nil)
-	created := decode[attachmentShape](t, doMultipart(t, f.app, "/v1/attachments", "gone.pdf", "%PDF-1.4 gone", ""))
+	created := decodeFirst(t, doMultipart(t, f.app, "/v1/attachments", "gone.pdf", "%PDF-1.4 gone", ""))
 
 	resp := doJSON(t, f.app, http.MethodDelete, "/v1/attachments/"+created.ID, "", "")
 	if resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusNotFound {

@@ -78,35 +78,49 @@ paths:
                   description: The attachment content (PDF or image only).
           application/json:
             description: |
-              Exactly one of source_url or source_uri is required. Send both
-              or neither -> 400. The service downloads the source itself.
+              Either the singular source_url/source_uri fields (one file) or
+              sources[] (up to 20 files). Each source needs exactly one of
+              source_url or source_uri. Every source is validated before any
+              file is committed: one bad source rejects the whole request.
             schema:
-              allOf:
-                - oneOf:
+              oneOf:
+                - allOf:
+                    - oneOf:
+                        - type: object
+                          title: HTTP source
+                          required: [source_url]
+                          properties:
+                            source_url:
+                              type: string
+                              format: uri
+                              description: http(s) URL to download. Private/reserved network targets are denied unless FETCH_ALLOW_PRIVATE_NET is set.
+                        - type: object
+                          title: S3 source
+                          required: [source_uri]
+                          properties:
+                            source_uri:
+                              type: string
+                              pattern: '^s3://[^/]+/.+'
+                              description: S3 object URI (s3://bucket/key). Bucket must pass the optional S3_ALLOWED_BUCKETS allowlist.
                     - type: object
-                      title: HTTP source
-                      required: [source_url]
                       properties:
-                        source_url:
+                        filename:
                           type: string
-                          format: uri
-                          description: http(s) URL to download. Private/reserved network targets are denied unless FETCH_ALLOW_PRIVATE_NET is set.
-                    - type: object
-                      title: S3 source
-                      required: [source_uri]
-                      properties:
-                        source_uri:
-                          type: string
-                          pattern: '^s3://[^/]+/.+'
-                          description: S3 object URI (s3://bucket/key). Bucket must pass the optional S3_ALLOWED_BUCKETS allowlist.
+                          description: Optional; only its extension is kept.
+                  title: Single source
                 - type: object
+                  title: Batch of sources
+                  required: [sources]
                   properties:
-                    filename:
-                      type: string
-                      description: |
-                        Optional. Only its extension is kept (e.g. .pdf);
-                        the original name is never stored. The stored file is
-                        named <X-Idempotency-Key><extension>.
+                    sources:
+                      type: array
+                      maxItems: 20
+                      items:
+                        type: object
+                        properties:
+                          source_url: { type: string, format: uri }
+                          source_uri: { type: string }
+                          filename: { type: string }
             examples:
               http:
                 summary: Download from an HTTP URL
@@ -116,17 +130,27 @@ paths:
                 summary: Download an S3 object
                 value:
                   source_uri: s3://my-bucket/invoices/2026-01.pdf
+              batch:
+                summary: Several sources in one request
+                value:
+                  sources:
+                    - source_url: https://example.com/quote.pdf
+                    - source_uri: s3://my-bucket/contract.pdf
       responses:
         "201":
-          description: Attachment stored
+          description: Attachments stored — array of records in request order
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Attachment" }
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Attachment" }
         "200":
-          description: Content already stored — the existing attachment is returned (deduplicated)
+          description: All content already stored — array of existing records (deduplicated)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Attachment" }
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Attachment" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }

@@ -33,19 +33,29 @@ Every `/v1` endpoint needs `X-API-Key`; every POST needs a UUID
 
 | Method | Path                       | Purpose                                          |
 | ------ | -------------------------- | ------------------------------------------------ |
-| POST   | `/v1/attachments`          | Multipart `file` part, or JSON `source_url` / `source_uri` |
+| POST   | `/v1/attachments`          | Multipart `file` part, or JSON `source_url` / `source_uri` / `sources[]` |
 | GET    | `/v1/attachments/{id}`     | Metadata                                         |
 
-Only PDF and image bytes are accepted (sniffed from content, not the filename);
-anything else returns `415`. Duplicate content returns the original record
-(`200` instead of `201`). The idempotency key becomes the stored filename
-(`<key>.<ext>`) so Windows paths stay short, and retries replay the first
+POST always returns a **JSON array** of records in request order. Only PDF and
+image bytes are accepted (sniffed from content, not the filename); anything
+else returns `415`. In a `sources[]` batch, every source is validated before
+anything is committed — one bad source rejects the whole request. Duplicate
+content returns the original record (`200` instead of `201`). The idempotency
+key becomes the stored filename (`<key>.<ext>`; later files in a batch get
+`<key>-2<ext>`, etc.) so Windows paths stay short. Retries replay the first
 response.
 
 ```sh
 curl -X POST localhost:8080/v1/attachments \
   -H "X-API-Key: local-dev-key" -H "X-Idempotency-Key: $(uuidgen)" \
   -F file=@invoice.pdf
+
+# Several sources in one request — one SAP Attachments2 call with all lines
+curl -X POST localhost:8080/v1/attachments \
+  -H "X-API-Key: local-dev-key" -H "X-Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' \
+  -d '{"sources":[{"source_uri":"s3://bucket/quote.pdf"},
+                  {"source_url":"https://example.com/contract.pdf"}]}'
 ```
 
 ## Storage
@@ -69,8 +79,10 @@ Set all four of `SAP_DATABASE`, `SAP_SERVICE_LAYER_URL`, `SAP_USERNAME` and
 Layer: log in at startup (the result appears in the boot log), then
 `POST /b1s/v1/Attachments2` with `SourcePath` = the stored file's directory
 (`\\IP\nas\sales`), `FileName` = the stored key and `FileExtension` = its
-extension. The session is kept warm: it is refreshed every 25 minutes and
-reused between uploads. SAP must be able to read
+extension. A batch of files becomes one call with several
+`Attachments2_Lines`; SAP returns one `AbsoluteEntry` for the collection,
+which is stored on each record. The session is kept warm: it is refreshed
+every 25 minutes and reused between uploads. SAP must be able to read
 that directory. A duplicate (deduplicated) upload creates no new entry. If
 the SAP call fails, the API returns `502` but keeps the file and record; a
 later upload of the same content retries only the SAP entry. Responses

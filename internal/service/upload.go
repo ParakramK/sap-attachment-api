@@ -20,9 +20,9 @@ import (
 // ErrUnsupportedType signals content that is neither PDF nor an image.
 var ErrUnsupportedType = errors.New("only PDF and image files are accepted")
 
-// allowedType accepts server-sniffed PDFs and images. Client-supplied content
-// types and file names are never consulted.
-func allowedType(contentType string) bool {
+// AllowedType reports whether server-sniffed content is a PDF or an image.
+// Client file names and Content-Type claims are never consulted.
+func AllowedType(contentType string) bool {
 	return contentType == "application/pdf" || strings.HasPrefix(contentType, "image/")
 }
 
@@ -76,7 +76,7 @@ func (u *Uploader) Upload(ctx context.Context, in Input) (att *db.Attachment, de
 		return nil, false, err
 	}
 	// Checked after staging so the size cap wins for oversized files.
-	if !allowedType(contentType) {
+	if !AllowedType(contentType) {
 		_ = staged.Discard()
 		return nil, false, ErrUnsupportedType
 	}

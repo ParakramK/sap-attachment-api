@@ -56,13 +56,13 @@ func TestCreateAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := `\\192.168.10.248\nas\sales\2d0e8181-9682-4a39-b948-c1b76e1f6040.jpg`
-	entry, err := client.CreateAttachment(context.Background(), path)
+	path := `\\192.0.2.10\nas\sales\2d0e8181-9682-4a39-b948-c1b76e1f6040.jpg`
+	entries, err := client.CreateAttachments(context.Background(), []string{path})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if entry != 148076 {
-		t.Fatalf("AbsoluteEntry = %d, want 148076", entry)
+	if len(entries) != 1 || entries[0] != 148076 {
+		t.Fatalf("AbsoluteEntry = %v, want [148076]", entries)
 	}
 
 	if loginBody["CompanyDB"] != "SBODEMO" || loginBody["UserName"] != "manager" || loginBody["Password"] != "secret" {
@@ -76,7 +76,7 @@ func TestCreateAttachment(t *testing.T) {
 		t.Fatalf("lines = %+v", attachmentBody)
 	}
 	line := lines[0].(map[string]any)
-	if line["SourcePath"] != `\\192.168.10.248\nas\sales` ||
+	if line["SourcePath"] != `\\192.0.2.10\nas\sales` ||
 		line["FileName"] != "2d0e8181-9682-4a39-b948-c1b76e1f6040" ||
 		line["FileExtension"] != "jpg" {
 		t.Fatalf("line = %+v", line)
@@ -100,7 +100,7 @@ func TestCreateAttachmentLoginFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CreateAttachment(context.Background(), "/data/a.pdf"); err == nil {
+	if _, err := client.CreateAttachments(context.Background(), []string{"/data/a.pdf"}); err == nil {
 		t.Fatal("expected error after failed login")
 	}
 }
@@ -157,7 +157,7 @@ func TestSessionReuseAndWarmRefresh(t *testing.T) {
 
 	// Burst of uploads reuses one login.
 	for range 2 {
-		if _, err := client.CreateAttachment(ctx, "/data/a.pdf"); err != nil {
+		if _, err := client.CreateAttachments(ctx, []string{"/data/a.pdf"}); err != nil {
 			t.Fatal(err)
 		}
 	}

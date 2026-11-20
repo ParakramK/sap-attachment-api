@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -56,14 +58,22 @@ func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
 }
 
 // createAttachment accepts either a multipart upload (a "file" part) or a
-// JSON body naming a remote source:
-//
-//	{"source_url": "https://..."} or {"source_uri": "s3://bucket/key"}
-type sourceRequest struct {
+// JSON body naming one or more remote sources. Successful responses are
+// always a JSON array of attachment records.
+type sourceEntry struct {
 	SourceURL string `json:"source_url"`
 	SourceURI string `json:"source_uri"`
 	Filename  string `json:"filename"`
 }
+
+type sourceRequest struct {
+	SourceURL string        `json:"source_url"`
+	SourceURI string        `json:"source_uri"`
+	Filename  string        `json:"filename"`
+	Sources   []sourceEntry `json:"sources"`
+}
+
+const maxSources = 20
 
 func createAttachment(d Deps) fiber.Handler {
 	return func(c fiber.Ctx) error {
@@ -72,47 +82,79 @@ func createAttachment(d Deps) fiber.Handler {
 			return fiber.NewError(http.StatusUnsupportedMediaType, "unsupported content type")
 		}
 
-		var input service.Input
+		var inputs []service.Input
 		switch {
 		case strings.HasPrefix(mediaType, "multipart/"):
-			input, err = multipartInput(c, params["boundary"])
+			var in service.Input
+			in, err = multipartInput(c, params["boundary"])
+			inputs = []service.Input{in}
 		case mediaType == "application/json":
-			input, err = sourceInput(c, d)
+			inputs, err = jsonInputs(c, d)
 		default:
 			return fiber.NewError(http.StatusUnsupportedMediaType, "expected multipart/form-data or application/json")
 		}
 		if err != nil {
 			return err // already an API error
 		}
-		input.IdempotencyKey = c.Get("X-Idempotency-Key") // guaranteed by the middleware
 
-		att, deduped, err := d.Uploader.Upload(c.Context(), input)
-		if err != nil {
-			return uploadError(err)
+		// One idempotency key per request; multiple files get -2, -3 suffixes.
+		baseKey := c.Get("X-Idempotency-Key") // guaranteed by the middleware
+		for i := range inputs {
+			inputs[i].IdempotencyKey = baseKey
+			if i > 0 {
+				inputs[i].IdempotencyKey = fmt.Sprintf("%s-%d", baseKey, i+1)
+			}
 		}
 
-		// Register in SAP for new content, and retry registration for a row
-		// whose earlier SAP call failed (the upload itself is deduplicated).
-		// On failure the file and row stay put; the caller gets 502.
-		if d.SAP != nil && !att.SAPRegistered {
-			entry, err := d.SAP.CreateAttachment(c.Context(), att.StoragePath)
+		// All validation failures happen before any commit (see jsonInputs).
+		records := make([]*db.Attachment, 0, len(inputs))
+		anyDeduped := false
+		for _, input := range inputs {
+			att, deduped, err := d.Uploader.Upload(c.Context(), input)
 			if err != nil {
-				d.Log.WarnContext(c.Context(), "sap attachment failed",
-					"err", err, "storage_path", att.StoragePath)
-				return fiber.NewError(http.StatusBadGateway, "failed to register attachment in SAP")
+				return uploadError(err)
 			}
-			if err := d.Repo.MarkSAPRegistered(c.Context(), att.ID, entry); err != nil {
-				return fiber.NewError(http.StatusInternalServerError, "failed to record SAP attachment entry")
-			}
-			att.SAPRegistered = true
-			att.SAPAbsoluteEntry = entry
+			records = append(records, att)
+			anyDeduped = anyDeduped || deduped
 		}
 
+		// One Service Layer call with all new/unregistered files as lines.
+		if d.SAP != nil {
+			pending := make([]*db.Attachment, 0, len(records))
+			for _, a := range records {
+				if !a.SAPRegistered {
+					pending = append(pending, a)
+				}
+			}
+			if len(pending) > 0 {
+				paths := make([]string, len(pending))
+				for i, a := range pending {
+					paths[i] = a.StoragePath
+				}
+				entries, err := d.SAP.CreateAttachments(c.Context(), paths)
+				if err != nil {
+					d.Log.WarnContext(c.Context(), "sap attachment failed", "err", err)
+					return fiber.NewError(http.StatusBadGateway, "failed to register attachment in SAP")
+				}
+				for i, a := range pending {
+					if err := d.Repo.MarkSAPRegistered(c.Context(), a.ID, entries[i]); err != nil {
+						return fiber.NewError(http.StatusInternalServerError, "failed to record SAP attachment entry")
+					}
+					a.SAPRegistered = true
+					a.SAPAbsoluteEntry = entries[i]
+				}
+			}
+		}
+
+		out := make([]attachmentResponse, len(records))
+		for i, a := range records {
+			out[i] = toResponse(a, d.Store)
+		}
 		status := http.StatusCreated
-		if deduped {
+		if anyDeduped {
 			status = http.StatusOK
 		}
-		return c.Status(status).JSON(toResponse(att, d.Store))
+		return c.Status(status).JSON(out)
 	}
 }
 
@@ -140,33 +182,72 @@ func multipartInput(c fiber.Ctx, boundary string) (service.Input, error) {
 	return service.Input{}, fiber.NewError(http.StatusBadRequest, "no file part in multipart body")
 }
 
-func sourceInput(c fiber.Ctx, d Deps) (service.Input, error) {
+// jsonInputs fetches and validates every source before anything is committed.
+// Bodies are buffered (bounded by MAX_UPLOAD_MB each) so validation of a later
+// source can abort the whole request without leaving earlier files behind.
+func jsonInputs(c fiber.Ctx, d Deps) ([]service.Input, error) {
 	var req sourceRequest
 	if err := json.Unmarshal(c.Body(), &req); err != nil {
-		return service.Input{}, fiber.NewError(http.StatusBadRequest, "invalid JSON body")
+		return nil, fiber.NewError(http.StatusBadRequest, "invalid JSON body")
 	}
 
+	var entries []sourceEntry
 	switch {
+	case len(req.Sources) > 0:
+		if req.SourceURL != "" || req.SourceURI != "" {
+			return nil, fiber.NewError(http.StatusBadRequest, "use sources[] or singular fields, not both")
+		}
+		if len(req.Sources) > maxSources {
+			return nil, fiber.NewError(http.StatusBadRequest, fmt.Sprintf("at most %d sources per request", maxSources))
+		}
+		entries = req.Sources
 	case req.SourceURL != "" && req.SourceURI == "":
+		entries = []sourceEntry{{SourceURL: req.SourceURL, Filename: req.Filename}}
 	case req.SourceURI != "" && req.SourceURL == "":
+		entries = []sourceEntry{{SourceURI: req.SourceURI, Filename: req.Filename}}
 	default:
-		return service.Input{}, fiber.NewError(http.StatusBadRequest, "set exactly one of source_url or source_uri")
+		return nil, fiber.NewError(http.StatusBadRequest, "set exactly one of source_url or source_uri, or provide sources[]")
 	}
 
-	uri := req.SourceURL
-	if uri == "" {
-		uri = req.SourceURI
-	}
+	inputs := make([]service.Input, 0, len(entries))
+	maxBytes := d.Cfg.MaxUploadBytes()
+	for _, entry := range entries {
+		if (entry.SourceURL == "") == (entry.SourceURI == "") {
+			return nil, fiber.NewError(http.StatusBadRequest, "each source needs exactly one of source_url or source_uri")
+		}
+		uri := entry.SourceURL
+		if uri == "" {
+			uri = entry.SourceURI
+		}
+		res, err := d.Fetcher.Fetch(c.Context(), uri)
+		if err != nil {
+			return nil, fetchError(err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(res.Body, maxBytes+1))
+		_ = res.Body.Close()
+		if readErr != nil {
+			return nil, fiber.NewError(http.StatusBadGateway, "failed to read remote source")
+		}
+		if int64(len(data)) > maxBytes {
+			return nil, fiber.NewError(http.StatusRequestEntityTooLarge, "remote source exceeds size limit")
+		}
+		head := data
+		if len(head) > 512 {
+			head = head[:512]
+		}
+		if !service.AllowedType(http.DetectContentType(head)) {
+			return nil, fiber.NewError(http.StatusUnsupportedMediaType, "only PDF and image files are accepted")
+		}
 
-	res, err := d.Fetcher.Fetch(c.Context(), uri)
-	if err != nil {
-		return service.Input{}, fetchError(err)
+		filename := entry.Filename
+		if filename == "" {
+			filename = res.Filename
+		}
+		inputs = append(inputs, service.Input{
+			Reader: bytes.NewReader(data), Filename: filename, Size: int64(len(data)),
+		})
 	}
-	filename := req.Filename
-	if filename == "" {
-		filename = res.Filename
-	}
-	return service.Input{Reader: res.Body, Filename: filename, Size: res.Size}, nil
+	return inputs, nil
 }
 
 // fetchError maps fetcher sentinels onto API errors.

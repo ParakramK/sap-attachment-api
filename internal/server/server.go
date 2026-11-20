@@ -29,7 +29,7 @@ import (
 // Deps carries everything the server needs; constructed in main.
 // SAPClient is consumer-defined so tests can fake it.
 type SAPClient interface {
-	CreateAttachment(ctx context.Context, storagePath string) (int64, error)
+	CreateAttachments(ctx context.Context, paths []string) ([]int64, error)
 }
 
 type Deps struct {

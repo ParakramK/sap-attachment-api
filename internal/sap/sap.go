@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,55 +121,75 @@ func (c *Client) ensureSession(ctx context.Context) error {
 	return nil
 }
 
-// CreateAttachment logs in and registers one stored file, returning SAP's
-// AbsoluteEntry id. SAP needs all three line fields: SourcePath is the
-// directory as seen by the SAP host, FileName the stored key and
-// FileExtension its extension — with only SourcePath, SAP creates an entry
-// with null name/extension.
-// CreateAttachment registers one stored file, returning SAP's AbsoluteEntry id.
-func (c *Client) CreateAttachment(ctx context.Context, storagePath string) (int64, error) {
+// CreateAttachments registers all stored files in one Attachments2 call and
+// returns SAP's AbsoluteEntry ids in the same order. SAP needs all three line
+// fields: SourcePath (directory), FileName (stored key), FileExtension.
+// entries for each line: SAP returns one top-level AbsoluteEntry for the
+// whole collection, with no per-line ids in the usual response.
+func (c *Client) CreateAttachments(ctx context.Context, storagePaths []string) ([]int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
 	if err := c.ensureSession(ctx); err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	dir, name, ext := splitPath(storagePath)
-	payload, err := json.Marshal(attachmentRequest{
-		Lines: []attachmentLine{{FileExtension: ext, FileName: name, SourcePath: dir}},
-	})
+	lines := make([]attachmentLine, 0, len(storagePaths))
+	for _, p := range storagePaths {
+		dir, name, ext := splitPath(p)
+		lines = append(lines, attachmentLine{FileExtension: ext, FileName: name, SourcePath: dir})
+	}
+	payload, err := json.Marshal(attachmentRequest{Lines: lines})
 	if err != nil {
-		return 0, fmt.Errorf("sap encode attachment: %w", err)
+		return nil, fmt.Errorf("sap encode attachment: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.base+"/b1s/v1/Attachments2", bytes.NewReader(payload))
 	if err != nil {
-		return 0, fmt.Errorf("sap attachment request: %w", err)
+		return nil, fmt.Errorf("sap attachment request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("sap attachment call: %w", err)
+		return nil, fmt.Errorf("sap attachment call: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return 0, fmt.Errorf("sap attachment status %d: %s", resp.StatusCode, errorBody(resp))
+		return nil, fmt.Errorf("sap attachment status %d: %s", resp.StatusCode, errorBody(resp))
 	}
 
 	var result struct {
 		AbsoluteEntry int64 `json:"AbsoluteEntry"`
+		Lines         []struct {
+			AbsoluteEntry int64 `json:"AbsoluteEntry"`
+		} `json:"Attachments2_Lines"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("sap attachment decode: %w", err)
+		return nil, fmt.Errorf("sap attachment decode: %w", err)
 	}
-	if result.AbsoluteEntry == 0 {
-		return 0, errors.New("sap attachment response missing AbsoluteEntry")
+
+	entries := make([]int64, len(lines))
+	if len(result.Lines) == len(lines) {
+		for i, line := range result.Lines {
+			entries[i] = line.AbsoluteEntry
+		}
 	}
-	return result.AbsoluteEntry, nil
+	if result.AbsoluteEntry != 0 {
+		for i := range entries {
+			if entries[i] == 0 {
+				entries[i] = result.AbsoluteEntry
+			}
+		}
+	}
+	for i, entry := range entries {
+		if entry == 0 {
+			return nil, fmt.Errorf("sap attachment response missing AbsoluteEntry for line %d", i+1)
+		}
+	}
+	return entries, nil
 }
 
 func (c *Client) login(ctx context.Context) error {
