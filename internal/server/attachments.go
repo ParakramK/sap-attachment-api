@@ -266,7 +266,9 @@ func fetchError(err error) error {
 	}
 }
 
-// uploadError maps uploader errors onto API errors.
+// uploadError maps uploader errors onto API errors. Unclassified failures are
+// logged with their root cause here: the global error handler only sees the
+// rewritten Fiber error and would otherwise hide it.
 func uploadError(err error) error {
 	switch {
 	case errors.Is(err, storage.ErrTooLarge):
@@ -274,7 +276,7 @@ func uploadError(err error) error {
 	case errors.Is(err, service.ErrUnsupportedType):
 		return fiber.NewError(http.StatusUnsupportedMediaType, "only PDF and image files are accepted")
 	default:
-		return fiber.NewError(http.StatusInternalServerError, "upload failed")
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("upload failed: %v", err))
 	}
 }
 
