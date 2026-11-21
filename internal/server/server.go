@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -191,9 +192,21 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 	}
 }
 
+// errorChain renders every wrapped cause, so one log line carries the full
+// story: "upload failed: commit object: smb ...: connection refused".
+func errorChain(err error) string {
+	var parts []string
+	for err != nil {
+		parts = append(parts, err.Error())
+		err = errors.Unwrap(err)
+	}
+	return strings.Join(parts, " -> ")
+}
+
 // errorHandler renders the service-wide error envelope:
 // {"code": <int>, "message": <string>, "request_id": <string>}.
-// Internal error details are never sent to the client.
+// Every failure is logged with its full cause chain and request context;
+// internal details are never sent to the client.
 func errorHandler(log *slog.Logger) fiber.ErrorHandler {
 	return func(c fiber.Ctx, err error) error {
 		code := fiber.StatusInternalServerError
@@ -206,10 +219,19 @@ func errorHandler(log *slog.Logger) fiber.ErrorHandler {
 		}
 
 		reqID := requestid.FromContext(c)
+		attrs := []any{
+			"request_id", reqID,
+			"method", c.Method(),
+			"path", c.Path(),
+			"remote_ip", c.IP(),
+			"status", code,
+			"error", errorChain(err),
+		}
 		if code >= http.StatusInternalServerError {
-			log.ErrorContext(c.Context(), "request failed",
-				"request_id", reqID, "status", code, "err", err)
-			msg = "internal server error"
+			log.ErrorContext(c.Context(), "request failed", attrs...)
+			msg = "internal server error" // never leak internals
+		} else {
+			log.WarnContext(c.Context(), "request rejected", attrs...)
 		}
 
 		return c.Status(code).JSON(fiber.Map{

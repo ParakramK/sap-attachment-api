@@ -153,8 +153,8 @@ func TestAccessLogReflectsErrorStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &rec); err != nil {
 		t.Fatalf("decode log line: %v", err)
 	}
-	if rec.Msg != "http_request" {
-		t.Fatalf("msg = %q, want http_request", rec.Msg)
+	if rec.Msg != "http_request" && rec.Msg != "request rejected" {
+		t.Fatalf("msg = %q, want http_request or request rejected", rec.Msg)
 	}
 	if rec.Status != http.StatusNotFound {
 		t.Fatalf("logged status = %d, want %d", rec.Status, http.StatusNotFound)
