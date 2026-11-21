@@ -138,19 +138,15 @@ paths:
                     - source_uri: s3://my-bucket/contract.pdf
       responses:
         "201":
-          description: Attachments stored — array of records in request order
+          description: Attachments stored
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/Attachment" }
+              schema: { $ref: "#/components/schemas/AttachmentList" }
         "200":
-          description: All content already stored — array of existing records (deduplicated)
+          description: All content already stored — existing records (deduplicated)
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/Attachment" }
+              schema: { $ref: "#/components/schemas/AttachmentList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -228,6 +224,19 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    AttachmentList:
+      type: object
+      required: [attachments, sap_absolute_entry]
+      properties:
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/Attachment" }
+        sap_absolute_entry:
+          type: integer
+          format: int64
+          description: |
+            One AbsoluteEntry for the whole collection from SAP Service Layer;
+            0 when SAP integration is disabled. Not repeated per attachment.
     Attachment:
       type: object
       properties:

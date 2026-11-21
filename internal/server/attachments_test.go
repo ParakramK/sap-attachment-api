@@ -156,14 +156,22 @@ func decode[T any](t *testing.T, resp *http.Response) T {
 	return v
 }
 
-// POST responses are arrays; helper for the single-file cases.
+// POST responses are {attachments:[...], sap_absolute_entry:<id or 0>}.
 func decodeFirst(t *testing.T, resp *http.Response) attachmentShape {
 	t.Helper()
-	all := decode[[]attachmentShape](t, resp)
-	if len(all) != 1 {
-		t.Fatalf("expected 1 attachment, got %d", len(all))
+	var list struct {
+		Attachments []attachmentShape `json:"attachments"`
+		Entry       int64             `json:"sap_absolute_entry"`
 	}
-	return all[0]
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(list.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(list.Attachments))
+	}
+	first := list.Attachments[0]
+	first.SAPAbsoluteEntry = list.Entry
+	return first
 }
 
 func TestCreateAndGetAttachment(t *testing.T) {
@@ -249,6 +257,14 @@ func TestFilenameIsKeyPlusOriginalExtension(t *testing.T) {
 	}
 	if filepath.Base(created.StoragePath) != created.Filename {
 		t.Fatalf("stored name = %q, want %q", created.StoragePath, created.Filename)
+	}
+}
+
+func TestSAPEntryIsZeroWhenDisabled(t *testing.T) {
+	f := newAPI(t, nil, nil)
+	created := decodeFirst(t, doMultipart(t, f.app, "/v1/attachments", "a.pdf", "%PDF-1.4 a", ""))
+	if created.SAPAbsoluteEntry != 0 {
+		t.Fatalf("sap_absolute_entry = %d, want 0 when SAP is disabled", created.SAPAbsoluteEntry)
 	}
 }
 
@@ -526,8 +542,14 @@ func TestCreateMultipleSources(t *testing.T) {
 	body := fmt.Sprintf(`{"sources":[{"source_url":%q},{"source_url":%q}]}`,
 		upstream.URL+"/first.pdf", upstream.URL+"/second.pdf")
 	resp := doJSON(t, f.app, http.MethodPost, "/v1/attachments", body, "")
-	// doJSON generated its own key; the response is still an array of two.
-	all := decode[[]attachmentShape](t, resp)
+	var list struct {
+		Attachments []attachmentShape `json:"attachments"`
+		Entry       int64             `json:"sap_absolute_entry"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	all := list.Attachments
 	if resp.StatusCode != http.StatusCreated || len(all) != 2 {
 		t.Fatalf("status = %d, records = %+v", resp.StatusCode, all)
 	}
@@ -537,12 +559,17 @@ func TestCreateMultipleSources(t *testing.T) {
 	if !strings.HasSuffix(all[1].Filename, "-2.pdf") {
 		t.Fatalf("second file name = %q, want key-2.pdf", all[1].Filename)
 	}
-	// One SAP call with both paths, one AbsoluteEntry per line.
+	// One SAP call with both paths, one collection-level AbsoluteEntry.
 	if len(sapClient.calls) != 2 {
 		t.Fatalf("sap calls = %v", sapClient.calls)
 	}
-	if all[0].SAPAbsoluteEntry == 0 || all[1].SAPAbsoluteEntry == 0 {
-		t.Fatalf("missing sap entries: %+v", all)
+	if list.Entry != 148077 { // fake assigns one id per line; collection uses the last
+		t.Fatalf("sap_absolute_entry = %d, want 148077", list.Entry)
+	}
+	for _, rec := range all {
+		if rec.SAPAbsoluteEntry != 0 {
+			t.Fatalf("per-record sap id must be absent: %+v", rec)
+		}
 	}
 }
 

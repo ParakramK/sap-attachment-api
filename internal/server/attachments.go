@@ -20,20 +20,27 @@ import (
 	"github.com/parakram/sap-attachment-api/internal/storage"
 )
 
+// attachmentList is the POST response: SAP's AbsoluteEntry identifies the
+// whole collection, so it appears once, outside the records.
+type attachmentList struct {
+	Attachments      []attachmentResponse `json:"attachments"`
+	SAPAbsoluteEntry int64                `json:"sap_absolute_entry"` // 0 when SAP is disabled
+}
+
 // attachmentResponse is the public shape of an attachment. StoragePath is the
-// absolute local disk path the SAP integration reads.
+// absolute local disk path the SAP integration reads. The SAP entry id is set
+// only for single-record GET responses; POST puts it on the collection.
 type attachmentResponse struct {
-	ID          string `json:"id"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
-	SHA256      string `json:"sha256"`
-	Status      string `json:"status"`
-	StoragePath string `json:"storage_path"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-	// SAP attachment entry id (0 when SAP integration is disabled).
-	SAPAbsoluteEntry int64 `json:"sap_absolute_entry,omitempty"`
+	ID               string `json:"id"`
+	Filename         string `json:"filename"`
+	ContentType      string `json:"content_type"`
+	SizeBytes        int64  `json:"size_bytes"`
+	SHA256           string `json:"sha256"`
+	Status           string `json:"status"`
+	StoragePath      string `json:"storage_path"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+	SAPAbsoluteEntry int64  `json:"sap_absolute_entry,omitempty"`
 }
 
 func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
@@ -44,16 +51,17 @@ func toResponse(a *db.Attachment, store storage.Storage) attachmentResponse {
 		ref = store.Reference(a.ObjectPath)
 	}
 	return attachmentResponse{
-		ID:               a.ID,
-		Filename:         a.Filename,
-		ContentType:      a.ContentType,
-		SizeBytes:        a.SizeBytes,
-		SHA256:           a.SHA256,
-		Status:           a.Status,
-		StoragePath:      ref,
-		CreatedAt:        a.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:        a.UpdatedAt.Format(time.RFC3339),
-		SAPAbsoluteEntry: a.SAPAbsoluteEntry,
+		ID:          a.ID,
+		Filename:    a.Filename,
+		ContentType: a.ContentType,
+		SizeBytes:   a.SizeBytes,
+		SHA256:      a.SHA256,
+		Status:      a.Status,
+		StoragePath: ref,
+		CreatedAt:   a.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   a.UpdatedAt.Format(time.RFC3339),
+		// No per-record SAP id: POST puts it on the collection; GET adds it
+		// to the single record below.
 	}
 }
 
@@ -147,14 +155,20 @@ func createAttachment(d Deps) fiber.Handler {
 		}
 
 		out := make([]attachmentResponse, len(records))
+		var collectionEntry int64
 		for i, a := range records {
 			out[i] = toResponse(a, d.Store)
+			if a.SAPAbsoluteEntry != 0 {
+				collectionEntry = a.SAPAbsoluteEntry // one id for the whole collection
+			}
 		}
 		status := http.StatusCreated
 		if anyDeduped {
 			status = http.StatusOK
 		}
-		return c.Status(status).JSON(out)
+		return c.Status(status).JSON(attachmentList{
+			Attachments: out, SAPAbsoluteEntry: collectionEntry,
+		})
 	}
 }
 
@@ -289,6 +303,8 @@ func getAttachment(d Deps) fiber.Handler {
 		if att == nil {
 			return fiber.NewError(http.StatusNotFound, "attachment not found")
 		}
-		return c.JSON(toResponse(att, d.Store))
+		resp := toResponse(att, d.Store)
+		resp.SAPAbsoluteEntry = att.SAPAbsoluteEntry
+		return c.JSON(resp)
 	}
 }

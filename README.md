@@ -36,7 +36,9 @@ Every `/v1` endpoint needs `X-API-Key`; every POST needs a UUID
 | POST   | `/v1/attachments`          | Multipart `file` part, or JSON `source_url` / `source_uri` / `sources[]` |
 | GET    | `/v1/attachments/{id}`     | Metadata                                         |
 
-POST always returns a **JSON array** of records in request order. Only PDF and
+POST returns a JSON object `{"attachments":[...], "sap_absolute_entry":<id>}`
+with records in request order. `sap_absolute_entry` is a **single id for the
+whole collection** (0 when SAP is disabled), never repeated per record. Only PDF and
 image bytes are accepted (sniffed from content, not the filename); anything
 else returns `415`. In a `sources[]` batch, every source is validated before
 anything is committed — one bad source rejects the whole request. Duplicate
@@ -81,7 +83,8 @@ Layer: log in at startup (the result appears in the boot log), then
 (`\\IP\nas\sales`), `FileName` = the stored key and `FileExtension` = its
 extension. A batch of files becomes one call with several
 `Attachments2_Lines`; SAP returns one `AbsoluteEntry` for the collection,
-which is stored on each record. The session is kept warm: it is refreshed
+which is returned once at the top level of the POST response (and in a GET of
+a single record). The session is kept warm: it is refreshed
 every 25 minutes and reused between uploads. SAP must be able to read
 that directory. A duplicate (deduplicated) upload creates no new entry. If
 the SAP call fails, the API returns `502` but keeps the file and record; a
